@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import { readFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -14,6 +15,10 @@ const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 const SESSION_FILE = path.join(DATA_DIR, 'session.json');
 const DEFAULT_LATITUDE = '-1.228552';
 const DEFAULT_LONGITUDE = '116.881761';
+const MAX_SAVED_PHOTOS = 30;
+const MAX_JSON_BODY_BYTES = 6 * 1024 * 1024;
+const MAX_PHOTO_BYTES = 4 * 1024 * 1024;
+const APP_CSRF_TOKEN = randomBytes(24).toString('hex');
 
 const jar = new Map();
 let lastCsrfToken = '';
@@ -29,6 +34,14 @@ async function getDb() {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS saved_photos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      label TEXT NOT NULL,
+      image_base64 TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      used_at TEXT
     )
   `);
   return db;
@@ -38,7 +51,11 @@ async function readState(key) {
   const database = await getDb();
   const row = database.prepare('SELECT value FROM app_state WHERE key = ?').get(key);
   if (!row) return null;
-  return JSON.parse(row.value);
+  try {
+    return JSON.parse(row.value);
+  } catch {
+    return null;
+  }
 }
 
 async function writeState(key, value) {
@@ -50,6 +67,114 @@ async function writeState(key, value) {
       value = excluded.value,
       updated_at = excluded.updated_at
   `).run(key, JSON.stringify(value), new Date().toISOString());
+}
+
+function photoSummary(row) {
+  return {
+    id: row.id,
+    label: row.label,
+    imageBase64: row.image_base64,
+    createdAt: row.created_at,
+    usedAt: row.used_at,
+  };
+}
+
+async function listPhotos() {
+  const database = await getDb();
+  return database.prepare(`
+    SELECT id, label, image_base64, created_at, used_at
+    FROM saved_photos
+    ORDER BY datetime(created_at) DESC, id DESC
+    LIMIT ?
+  `).all(MAX_SAVED_PHOTOS).map(photoSummary);
+}
+
+async function getPhoto(id) {
+  const photoId = Number(id);
+  if (!Number.isInteger(photoId) || photoId <= 0) return null;
+  const database = await getDb();
+  const row = database.prepare(`
+    SELECT id, label, image_base64, created_at, used_at
+    FROM saved_photos
+    WHERE id = ?
+  `).get(photoId);
+  return row ? photoSummary(row) : null;
+}
+
+async function savePhoto(input) {
+  const imageBase64 = String(input.imageBase64 || '');
+  validatePhotoDataUrl(imageBase64);
+
+  const label = String(input.label || '').trim() || `Foto ${new Date().toLocaleString('id-ID')}`;
+  const database = await getDb();
+  const result = database.prepare(`
+    INSERT INTO saved_photos (label, image_base64, created_at, used_at)
+    VALUES (?, ?, ?, NULL)
+  `).run(label.slice(0, 120), imageBase64, new Date().toISOString());
+
+  database.prepare(`
+    DELETE FROM saved_photos
+    WHERE id NOT IN (
+      SELECT id FROM saved_photos
+      ORDER BY datetime(created_at) DESC, id DESC
+      LIMIT ?
+    )
+  `).run(MAX_SAVED_PHOTOS);
+
+  return getPhoto(result.lastInsertRowid);
+}
+
+async function deletePhoto(id) {
+  const photoId = Number(id);
+  if (!Number.isInteger(photoId) || photoId <= 0) throw new Error('Photo ID tidak valid');
+  const database = await getDb();
+  const result = database.prepare('DELETE FROM saved_photos WHERE id = ?').run(photoId);
+  return { deleted: result.changes > 0 };
+}
+
+async function markPhotoUsed(id) {
+  const photoId = Number(id);
+  if (!Number.isInteger(photoId) || photoId <= 0) return;
+  const database = await getDb();
+  database.prepare('UPDATE saved_photos SET used_at = ? WHERE id = ?').run(new Date().toISOString(), photoId);
+}
+
+function estimateDataUrlBytes(value) {
+  const base64 = String(value || '').split(',')[1] || '';
+  return Math.ceil((base64.length * 3) / 4);
+}
+
+function validatePhotoDataUrl(imageBase64) {
+  if (!imageBase64.startsWith('data:image/')) throw new Error('Foto wajib dalam format data:image/...;base64');
+  if (estimateDataUrlBytes(imageBase64) > MAX_PHOTO_BYTES) throw new Error('Ukuran foto terlalu besar. Maksimal 4 MB per foto.');
+}
+
+function isLocalHostname(value) {
+  return ['localhost', '127.0.0.1', '::1', '[::1]'].includes(String(value || '').toLowerCase());
+}
+
+function hostnameFromHostHeader(value) {
+  const host = String(value || '').toLowerCase();
+  if (host.startsWith('[')) return host.slice(1, host.indexOf(']'));
+  return host.split(':')[0];
+}
+
+function isAllowedLocalRequest(req) {
+  if (!isLocalHostname(hostnameFromHostHeader(req.headers.host))) return false;
+
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  try {
+    return isLocalHostname(new URL(origin).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function requireAppCsrf(req) {
+  if (req.method === 'GET' || req.method === 'HEAD') return;
+  const token = req.headers['x-app-csrf-token'];
+  if (token !== APP_CSRF_TOKEN) throw new Error('Token aplikasi tidak valid. Refresh halaman lalu coba lagi.');
 }
 
 function json(res, status, body) {
@@ -137,6 +262,16 @@ function cookieHeader() {
   return [...jar.entries()].map(([key, value]) => `${key}=${value}`).join('; ');
 }
 
+function isLoginRedirect(response) {
+  const location = response.headers.get('location') || '';
+  return response.status >= 300 && response.status < 400 && /\/login(?:$|[?#])/i.test(location);
+}
+
+function isLoginPageHtml(html) {
+  return /id=["']login-form["']/i.test(html)
+    || /<form\b[^>]*action=["'][^"']*\/login[^"']*["'][^>]*>/i.test(html);
+}
+
 async function hrisFetch(url, options = {}) {
   await loadSession();
   const headers = new Headers(options.headers || {});
@@ -185,34 +320,42 @@ function stripTags(value) {
   return decodeHtml(value.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim());
 }
 
+function readHtmlAttr(attrs, name) {
+  const match = String(attrs || '').match(new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i'));
+  return decodeHtml(match?.[1] ?? match?.[2] ?? match?.[3] ?? '');
+}
+
 function parseFormFields(html) {
   const fields = {};
-  const inputRegex = /<(input|select|textarea)\b([^>]*)>([\s\S]*?)(?:<\/\1>)?/gi;
+  const shouldSkip = (name) => !name || name.startsWith('f_');
+
+  const selectRegex = /<select\b([^>]*)>([\s\S]*?)<\/select>/gi;
   let match;
+  while ((match = selectRegex.exec(html))) {
+    const name = readHtmlAttr(match[1], 'name');
+    if (shouldSkip(name)) continue;
 
+    const options = [...match[2].matchAll(/<option\b([^>]*)>([\s\S]*?)<\/option>/gi)];
+    const selected = options.find((option) => /\bselected\b/i.test(option[1]));
+    const option = selected || options[0];
+    fields[name] = option ? readHtmlAttr(option[1], 'value') || stripTags(option[2] || '') : '';
+  }
+
+  const textareaRegex = /<textarea\b([^>]*)>([\s\S]*?)<\/textarea>/gi;
+  while ((match = textareaRegex.exec(html))) {
+    const name = readHtmlAttr(match[1], 'name');
+    if (!shouldSkip(name)) fields[name] = stripTags(match[2] || '');
+  }
+
+  const inputRegex = /<input\b([^>]*)>/gi;
   while ((match = inputRegex.exec(html))) {
-    const tag = match[1].toLowerCase();
-    const attrs = match[2];
-    const name = attrs.match(/\bname="([^"]+)"/)?.[1];
-    if (!name || name.startsWith('f_')) continue;
+    const attrs = match[1];
+    const name = readHtmlAttr(attrs, 'name');
+    if (shouldSkip(name)) continue;
 
-    if (tag === 'select') {
-      const selected = match[0].match(/<option([^>]*)selected([^>]*)>([\s\S]*?)<\/option>/i);
-      const first = match[0].match(/<option([^>]*)>([\s\S]*?)<\/option>/i);
-      const source = selected || first;
-      const optionAttrs = source ? `${source[1] || ''} ${source[2] || ''}` : '';
-      fields[name] = optionAttrs.match(/value="([^"]*)"/)?.[1] || '';
-      continue;
-    }
-
-    if (tag === 'textarea') {
-      fields[name] = stripTags(match[3] || '');
-      continue;
-    }
-
-    const type = attrs.match(/\btype="([^"]+)"/)?.[1]?.toLowerCase() || 'text';
+    const type = readHtmlAttr(attrs, 'type').toLowerCase() || 'text';
     if ((type === 'checkbox' || type === 'radio') && !/\bchecked\b/i.test(attrs)) continue;
-    fields[name] = decodeHtml(attrs.match(/\bvalue="([^"]*)"/)?.[1] || '');
+    fields[name] = readHtmlAttr(attrs, 'value');
   }
 
   return fields;
@@ -290,10 +433,33 @@ function parseDashboardStatus(html) {
 }
 
 async function readJson(req) {
+  if (req.method !== 'GET' && !String(req.headers['content-type'] || '').includes('application/json')) {
+    throw new Error('Content-Type wajib application/json');
+  }
+
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > MAX_JSON_BODY_BYTES) throw new Error('Request terlalu besar. Maksimal 6 MB.');
+    chunks.push(chunk);
+  }
+
   const body = Buffer.concat(chunks).toString('utf8');
-  return body ? JSON.parse(body) : {};
+  if (!body) return {};
+  try {
+    return JSON.parse(body);
+  } catch {
+    throw new Error('Body JSON tidak valid');
+  }
+}
+
+function normalizeTimeSetting(value, fallback) {
+  const match = String(value || '').match(/^(\d{1,2}):(\d{2})$/);
+  const hour = match ? Number(match[1]) : NaN;
+  const minute = match ? Number(match[2]) : NaN;
+  if (!match || hour > 23 || minute > 59) return fallback;
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
 const DEFAULT_SETTINGS = {
@@ -302,6 +468,17 @@ const DEFAULT_SETTINGS = {
   officeLatitude: DEFAULT_LATITUDE,
   officeLongitude: DEFAULT_LONGITUDE,
   officeName: 'PT Minergo Visi Maxima',
+  scheduleEnabled: false,
+  checkInTime: '09:00',
+  checkOutTime: '18:00',
+  randomCheckInEnabled: false,
+  randomCheckOutEnabled: false,
+  randomPhotoEnabled: false,
+  selectedPhotoId: '',
+  checkInStartTime: '08:45',
+  checkInEndTime: '09:00',
+  checkOutStartTime: '17:45',
+  checkOutEndTime: '18:15',
 };
 
 async function readSettings() {
@@ -318,11 +495,22 @@ async function saveSettings(settings) {
   const current = await readSettings();
   const safe = {
     ...current,
-    defaultLocationId: String(settings.defaultLocationId || ''),
-    workingFrom: String(settings.workingFrom || ''),
-    officeLatitude: String(settings.officeLatitude || current.officeLatitude || ''),
-    officeLongitude: String(settings.officeLongitude || current.officeLongitude || ''),
-    officeName: String(settings.officeName || current.officeName || ''),
+    defaultLocationId: Object.hasOwn(settings, 'defaultLocationId') ? String(settings.defaultLocationId || '') : current.defaultLocationId,
+    workingFrom: Object.hasOwn(settings, 'workingFrom') ? String(settings.workingFrom || '') : current.workingFrom,
+    officeLatitude: Object.hasOwn(settings, 'officeLatitude') ? String(settings.officeLatitude || current.officeLatitude || '') : current.officeLatitude,
+    officeLongitude: Object.hasOwn(settings, 'officeLongitude') ? String(settings.officeLongitude || current.officeLongitude || '') : current.officeLongitude,
+    officeName: Object.hasOwn(settings, 'officeName') ? String(settings.officeName || current.officeName || '') : current.officeName,
+    scheduleEnabled: Object.hasOwn(settings, 'scheduleEnabled') ? Boolean(settings.scheduleEnabled) : Boolean(current.scheduleEnabled),
+    checkInTime: Object.hasOwn(settings, 'checkInTime') ? normalizeTimeSetting(settings.checkInTime, '09:00') : current.checkInTime,
+    checkOutTime: Object.hasOwn(settings, 'checkOutTime') ? normalizeTimeSetting(settings.checkOutTime, '18:00') : current.checkOutTime,
+    randomCheckInEnabled: Object.hasOwn(settings, 'randomCheckInEnabled') ? Boolean(settings.randomCheckInEnabled) : Boolean(current.randomCheckInEnabled),
+    randomCheckOutEnabled: Object.hasOwn(settings, 'randomCheckOutEnabled') ? Boolean(settings.randomCheckOutEnabled) : Boolean(current.randomCheckOutEnabled),
+    randomPhotoEnabled: Object.hasOwn(settings, 'randomPhotoEnabled') ? Boolean(settings.randomPhotoEnabled) : Boolean(current.randomPhotoEnabled),
+    selectedPhotoId: Object.hasOwn(settings, 'selectedPhotoId') ? String(settings.selectedPhotoId || '') : current.selectedPhotoId,
+    checkInStartTime: Object.hasOwn(settings, 'checkInStartTime') ? normalizeTimeSetting(settings.checkInStartTime, '08:45') : current.checkInStartTime,
+    checkInEndTime: Object.hasOwn(settings, 'checkInEndTime') ? normalizeTimeSetting(settings.checkInEndTime, '09:00') : current.checkInEndTime,
+    checkOutStartTime: Object.hasOwn(settings, 'checkOutStartTime') ? normalizeTimeSetting(settings.checkOutStartTime, '17:45') : current.checkOutStartTime,
+    checkOutEndTime: Object.hasOwn(settings, 'checkOutEndTime') ? normalizeTimeSetting(settings.checkOutEndTime, '18:15') : current.checkOutEndTime,
   };
   await writeState('settings', safe);
   return safe;
@@ -369,6 +557,7 @@ async function login({ email, password }) {
     throw new Error(payload.message || payload.error || 'Login gagal');
   }
   await saveSession();
+  await getDashboardHtml();
   return payload;
 }
 
@@ -380,10 +569,11 @@ async function getDashboardHtml() {
     },
   });
   const html = await response.text();
-  if (!response.ok || html.includes('id="login-form"') || html.includes('name="email"') || html.includes('id="password"')) {
+  if (isLoginRedirect(response) || isLoginPageHtml(html)) {
     await clearSession();
     throw new Error('Session HRIS habis, silakan login ulang');
   }
+  if (!response.ok) throw new Error(`Dashboard HRIS gagal dimuat (${response.status})`);
   extractCsrfLoose(html);
   return html;
 }
@@ -415,10 +605,11 @@ async function getClockInModal() {
     },
   });
   const html = await response.text();
-  if (html.includes('id="login-form"')) {
+  if (isLoginRedirect(response) || isLoginPageHtml(html)) {
     await clearSession();
     throw new Error('Session HRIS habis, silakan login ulang');
   }
+  if (!response.ok) throw new Error(`Modal clock-in HRIS gagal dimuat (${response.status})`);
   return parseModal(html);
 }
 
@@ -480,29 +671,31 @@ async function getDashboardStatus() {
 async function storeClockIn(input) {
   const settings = await readSettings();
   const modal = input.csrfToken ? null : await getClockInModal();
-  const token = input.csrfToken || modal.csrfToken || lastCsrfToken;
+  const token = String(input.csrfToken || modal?.csrfToken || lastCsrfToken || '');
   const location = String(input.location || settings.defaultLocationId || modal?.locations?.find((item) => item.selected)?.id || '');
   const currentLatitude = String(input.currentLatitude || settings.officeLatitude || DEFAULT_LATITUDE);
   const currentLongitude = String(input.currentLongitude || settings.officeLongitude || DEFAULT_LONGITUDE);
-  const imageBase64 = String(input.imageBase64 || '');
+  const selectedPhoto = input.photoId ? await getPhoto(input.photoId) : null;
+  const imageBase64 = String(input.imageBase64 || selectedPhoto?.imageBase64 || '');
 
+  if (!token) throw new Error('CSRF token clock-in tidak ditemukan. Refresh data lalu coba lagi.');
+  if (input.photoId && !selectedPhoto) throw new Error('Foto tersimpan tidak ditemukan');
   if (!location) throw new Error('Location belum dipilih');
   if (!currentLatitude || !currentLongitude) throw new Error('Latitude/longitude belum tersedia');
-  if (!imageBase64.startsWith('data:image/')) throw new Error('Foto webcam wajib dalam format data:image/...;base64');
+  validatePhotoDataUrl(imageBase64);
 
-  const body = new URLSearchParams({
-    working_from: String(input.working_from || settings.workingFrom || ''),
-    location,
-    work_from_type: String(input.work_from_type || 'office'),
-    currentLatitude,
-    currentLongitude,
-    imageBase64,
-    fix_clock_out_time: String(input.fix_clock_out_time || ''),
-    fix_clock_out_note: String(input.fix_clock_out_note || ''),
-    last_attendance_id: String(input.last_attendance_id || modal?.lastAttendanceId || ''),
-    last_attendance_date: String(input.last_attendance_date || modal?.lastAttendanceDate || ''),
-    _token: token,
-  });
+  const body = new URLSearchParams(modal?.fields || {});
+  body.set('working_from', String(input.working_from || settings.workingFrom || ''));
+  body.set('location', location);
+  body.set('work_from_type', String(input.work_from_type || 'office'));
+  body.set('currentLatitude', currentLatitude);
+  body.set('currentLongitude', currentLongitude);
+  body.set('imageBase64', imageBase64);
+  body.set('fix_clock_out_time', String(input.fix_clock_out_time || ''));
+  body.set('fix_clock_out_note', String(input.fix_clock_out_note || ''));
+  body.set('last_attendance_id', String(input.last_attendance_id || modal?.lastAttendanceId || ''));
+  body.set('last_attendance_date', String(input.last_attendance_date || modal?.lastAttendanceDate || ''));
+  body.set('_token', token);
 
   const response = await hrisFetch('/account/attendances/store-clock-in', {
     method: 'POST',
@@ -521,6 +714,7 @@ async function storeClockIn(input) {
   if (isFailedPayload(response, payload)) {
     throw new Error(payload.message || payload.error || 'Clock-in gagal');
   }
+  if (selectedPhoto) await markPhotoUsed(selectedPhoto.id);
   return payload;
 }
 
@@ -586,6 +780,16 @@ async function route(req, res) {
   try {
     const url = new URL(req.url, 'http://localhost');
 
+    if (url.pathname.startsWith('/api/') && !isAllowedLocalRequest(req)) {
+      return json(res, 403, { status: 'error', message: 'API lokal hanya menerima request dari localhost.' });
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/bootstrap') {
+      return json(res, 200, { appCsrfToken: APP_CSRF_TOKEN });
+    }
+
+    if (url.pathname.startsWith('/api/')) requireAppCsrf(req);
+
     if (req.method === 'POST' && url.pathname === '/api/login') {
       const payload = await readJson(req);
       return json(res, 200, await login(payload));
@@ -593,6 +797,11 @@ async function route(req, res) {
 
     if (req.method === 'GET' && url.pathname === '/api/session') {
       return json(res, 200, await getSessionStatus());
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/logout') {
+      await clearSession();
+      return json(res, 200, { loggedIn: false, message: 'Logout sukses' });
     }
 
     if (req.method === 'GET' && url.pathname === '/api/clock-in-options') {
@@ -616,6 +825,18 @@ async function route(req, res) {
       return json(res, 200, await saveSettings(await readJson(req)));
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/photos') {
+      return json(res, 200, { photos: await listPhotos() });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/photos') {
+      return json(res, 200, await savePhoto(await readJson(req)));
+    }
+
+    if (req.method === 'DELETE' && url.pathname.startsWith('/api/photos/')) {
+      return json(res, 200, await deletePhoto(url.pathname.split('/').pop()));
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/clock-in') {
       return json(res, 200, await storeClockIn(await readJson(req)));
     }
@@ -631,6 +852,14 @@ async function route(req, res) {
 }
 
 const port = Number(process.env.PORT || 3000);
-createServer(route).listen(port, () => {
-  console.log(`HRIS Clock-In Helper running at http://localhost:${port}`);
+const server = createServer(route);
+server.on('error', (error) => {
+  if (error.code === 'EADDRINUSE') {
+    console.error(`Port ${port} sudah dipakai. Jalankan dengan PORT lain, contoh: PORT=3100 npm start`);
+    process.exit(1);
+  }
+  throw error;
+});
+server.listen(port, '127.0.0.1', () => {
+  console.log(`HRIS Clock-In Helper running at http://127.0.0.1:${port}`);
 });

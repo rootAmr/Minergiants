@@ -10,13 +10,25 @@
   <main class="shell">
     <section class="hero card">
       <div>
+        <div class="status-pill floating-status" id="sessionStatus">Belum login</div>
         <p class="eyebrow">MConnect HRIS</p>
-        <h1>Clock-in manual dengan lokasi default.</h1>
+        <h1>Halo minergiant jangan lupa absen</h1>
         <p class="lead">Login ke HRIS, pilih default location, pakai GPS default/browser dan foto webcam, lalu submit clock-in dari satu halaman.</p>
       </div>
       <div class="hero-actions">
-        <div class="status-pill" id="sessionStatus">Belum login</div>
-        <button class="secondary compact" id="refreshSession" type="button">Refresh Session</button>
+        <div class="session-actions">
+          <button class="secondary compact" id="refreshSession" type="button" hidden>Refresh</button>
+          <button class="secondary compact ghost" id="logout" type="button" hidden>Logout</button>
+        </div>
+        <form class="hero-login" id="loginForm">
+          <div id="loginFields">
+            <label>Email</label>
+            <input id="email" type="email" autocomplete="username" placeholder="nama@perusahaan.com" required>
+            <label>Password</label>
+            <input id="password" type="password" autocomplete="current-password" placeholder="Password HRIS" required>
+            <button class="primary" type="submit">Login</button>
+          </div>
+        </form>
       </div>
     </section>
 
@@ -40,71 +52,129 @@
     </section>
 
     <section class="grid">
-      <form class="card panel" id="loginForm">
+      <section class="card panel schedule-panel">
         <div class="section-title">
           <span>01</span>
-          <h2>Login HRIS</h2>
+          <h2>Jadwal Otomatis</h2>
         </div>
-        <label>Email</label>
-        <input id="email" type="email" autocomplete="username" placeholder="nama@perusahaan.com" required>
-        <label>Password</label>
-        <input id="password" type="password" autocomplete="current-password" placeholder="Password HRIS" required>
-        <button class="primary" type="submit">Login</button>
-      </form>
+        <div class="schedule-toggle-row">
+          <span id="scheduleInfo">Jadwal nonaktif</span>
+          <div class="schedule-toggle-actions">
+            <button class="toggle compact" id="scheduleEnabled" type="button" aria-pressed="false">Schedule: OFF</button>
+            <button class="icon-toggle compact" id="scheduleCollapse" type="button" aria-expanded="true" aria-label="Sembunyikan detail jadwal">&#9652;</button>
+          </div>
+        </div>
+        <div id="scheduleDetails" hidden>
+          <div class="schedule-group">
+            <div class="schedule-group-head">
+              <b>Check In</b>
+              <button class="toggle compact" id="randomCheckInEnabled" type="button" aria-pressed="false">Random CI: OFF</button>
+            </div>
+            <label>Jam Check In Tetap</label>
+            <input id="checkInTime" type="time" value="09:00">
+            <div class="time-range">
+              <label>Dari <input id="checkInStartTime" type="time" value="08:45"></label>
+              <label>Sampai <input id="checkInEndTime" type="time" value="09:00"></label>
+            </div>
+          </div>
 
-      <section class="card panel">
-        <div class="section-title">
-          <span>02</span>
-          <h2>Default Location</h2>
+          <div class="schedule-group">
+            <div class="schedule-group-head">
+              <b>Check Out</b>
+              <button class="toggle compact" id="randomCheckOutEnabled" type="button" aria-pressed="false">Random CO: OFF</button>
+            </div>
+            <label>Jam Check Out Tetap</label>
+            <input id="checkOutTime" type="time" value="18:00">
+            <div class="time-range">
+              <label>Dari <input id="checkOutStartTime" type="time" value="17:45"></label>
+              <label>Sampai <input id="checkOutEndTime" type="time" value="18:15"></label>
+            </div>
+          </div>
+
+          <button class="secondary" id="saveSchedule" type="button">Simpan Jadwal</button>
         </div>
-        <p class="hint">Default ini memilih lokasi dari daftar HRIS. GPS memakai default lokal jika browser belum/gagal mengambil lokasi.</p>
-        <div class="office-ref">
-          <b id="officeName">PT Minergo Visi Maxima</b>
-          <span id="officeCoords">-1.228552, 116.881761</span>
-        </div>
-        <label>Location</label>
-        <select id="locationSelect"></select>
-        <label>Working From</label>
-        <input id="workingFrom" type="text" placeholder="Kosongkan jika lokasi kantor">
-        <button class="secondary" id="saveSettings" type="button">Simpan Default</button>
       </section>
     </section>
 
     <section class="card clock-card">
       <div class="section-title">
-        <span>03</span>
+        <span>02</span>
         <h2>Clock In</h2>
       </div>
 
       <div class="clock-grid">
-        <div class="camera-box">
-          <video id="video" autoplay playsinline></video>
-          <canvas id="canvas" width="320" height="240" hidden></canvas>
-          <img id="preview" alt="Preview foto clock-in" hidden>
-          <div class="camera-actions">
-            <button class="secondary" id="startCamera" type="button">Nyalakan Kamera</button>
-            <button class="secondary" id="snap" type="button">Ambil Foto</button>
-          </div>
-        </div>
-
         <div class="clock-form">
-          <div class="info-stack">
-            <div>
-              <b>Lokasi GPS</b>
-              <span id="geoStatus">-1.228552, 116.881761 (default)</span>
+          <div class="clock-main-grid">
+            <div class="clock-controls">
+              <div class="clock-location-settings">
+                <div class="office-ref">
+                  <b id="officeName">PT Minergo Visi Maxima</b>
+                  <span id="officeCoords">-1.228552, 116.881761</span>
+                </div>
+                <label>Location</label>
+                <select id="locationSelect"></select>
+                <label>Working From</label>
+                <input id="workingFrom" type="text" placeholder="Kosongkan jika lokasi kantor">
+                <button class="secondary" id="saveSettings" type="button">Simpan Default</button>
+              </div>
+
+              <div class="info-stack">
+                <div>
+                  <b>Lokasi GPS</b>
+                  <span id="geoStatus">-1.228552, 116.881761 (default)</span>
+                </div>
+                <div>
+                  <b>Modal HRIS</b>
+                  <span id="modalInfo">Login dulu untuk load opsi</span>
+                </div>
+                <div>
+                  <b>Status Clock Out</b>
+                  <span id="clockOutInfo">Belum dicek</span>
+                </div>
+              </div>
+
+              <div class="utility-actions">
+                <button class="secondary" id="getLocation" type="button">Ambil GPS</button>
+                <button class="secondary" id="refreshClockOut" type="button">Cek Clock Out</button>
+              </div>
             </div>
-            <div>
-              <b>Modal HRIS</b>
-              <span id="modalInfo">Login dulu untuk load opsi</span>
-            </div>
-            <div>
-              <b>Status Clock Out</b>
-              <span id="clockOutInfo">Belum dicek</span>
+
+            <div class="saved-photos">
+              <div class="saved-photos-head">
+                <div>
+                  <b>Pilih Foto Tersimpan</b>
+                  <span id="selectedPhotoInfo">Belum ada foto dipilih</span>
+                </div>
+                <div class="saved-photos-actions">
+                  <button class="toggle compact" id="randomPhoto" type="button" aria-pressed="false">Random: OFF</button>
+                  <button class="secondary compact" id="refreshPhotos" type="button">Refresh Foto</button>
+                </div>
+              </div>
+              <div class="camera-box" id="cameraBox" hidden>
+                <div class="camera-preview-grid">
+                  <div class="camera-pane">
+                    <span>Camera</span>
+                    <video id="video" autoplay playsinline></video>
+                  </div>
+                  <div class="camera-pane">
+                    <span>Preview</span>
+                    <img id="preview" alt="Preview foto clock-in" hidden>
+                  </div>
+                </div>
+                <canvas id="canvas" width="320" height="240" hidden></canvas>
+              </div>
+              <div class="camera-actions saved-camera-actions">
+                <button class="secondary" id="startCamera" type="button">Nyalakan Kamera</button>
+                <button class="secondary" id="snap" type="button">Ambil Foto</button>
+              </div>
+              <div class="photo-save-row">
+                <input id="photoLabel" type="text" placeholder="Label foto, contoh: Senin pagi">
+                <button class="secondary" id="savePhoto" type="button">Simpan Foto</button>
+              </div>
+              <p class="hint">Foto yang disimpan masuk database lokal dan bisa dipilih lagi sebelum clock-in.</p>
+              <div class="photo-list" id="photoList"></div>
             </div>
           </div>
-
-          <button class="secondary" id="getLocation" type="button">Ambil GPS</button>
-          <button class="secondary" id="refreshClockOut" type="button">Cek Clock Out</button>
 
           <div class="fix-box" id="fixBox" hidden>
             <p class="hint strong">HRIS meminta clock-out kemarin dilengkapi dulu.</p>
