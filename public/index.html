@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Minergo Clock-In Helper</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="hero card">
+      <div>
+        <p class="eyebrow">MConnect HRIS</p>
+        <h1>Clock-in manual dengan lokasi default.</h1>
+        <p class="lead">Login ke HRIS, pilih default location, pakai GPS default/browser dan foto webcam, lalu submit clock-in dari satu halaman.</p>
+      </div>
+      <div class="hero-actions">
+        <div class="status-pill" id="sessionStatus">Belum login</div>
+        <button class="secondary compact" id="refreshSession" type="button">Refresh Session</button>
+      </div>
+    </section>
+
+    <section class="card hris-strip">
+      <div>
+        <span>Dashboard Clock</span>
+        <b id="hrisClock">--:--</b>
+      </div>
+      <div>
+        <span>Tanggal / Hari</span>
+        <b id="hrisDate">-</b>
+      </div>
+      <div>
+        <span>Status</span>
+        <b id="hrisStatus">Belum login</b>
+      </div>
+      <div>
+        <span>Clock In at</span>
+        <b id="hrisClockInAt">-</b>
+      </div>
+    </section>
+
+    <section class="grid">
+      <form class="card panel" id="loginForm">
+        <div class="section-title">
+          <span>01</span>
+          <h2>Login HRIS</h2>
+        </div>
+        <label>Email</label>
+        <input id="email" type="email" autocomplete="username" placeholder="nama@perusahaan.com" required>
+        <label>Password</label>
+        <input id="password" type="password" autocomplete="current-password" placeholder="Password HRIS" required>
+        <button class="primary" type="submit">Login</button>
+      </form>
+
+      <section class="card panel">
+        <div class="section-title">
+          <span>02</span>
+          <h2>Default Location</h2>
+        </div>
+        <p class="hint">Default ini memilih lokasi dari daftar HRIS. GPS memakai default lokal jika browser belum/gagal mengambil lokasi.</p>
+        <div class="office-ref">
+          <b id="officeName">PT Minergo Visi Maxima</b>
+          <span id="officeCoords">-1.228552, 116.881761</span>
+        </div>
+        <label>Location</label>
+        <select id="locationSelect"></select>
+        <label>Working From</label>
+        <input id="workingFrom" type="text" placeholder="Kosongkan jika lokasi kantor">
+        <button class="secondary" id="saveSettings" type="button">Simpan Default</button>
+      </section>
+    </section>
+
+    <section class="card clock-card">
+      <div class="section-title">
+        <span>03</span>
+        <h2>Clock In</h2>
+      </div>
+
+      <div class="clock-grid">
+        <div class="camera-box">
+          <video id="video" autoplay playsinline></video>
+          <canvas id="canvas" width="320" height="240" hidden></canvas>
+          <img id="preview" alt="Preview foto clock-in" hidden>
+          <div class="camera-actions">
+            <button class="secondary" id="startCamera" type="button">Nyalakan Kamera</button>
+            <button class="secondary" id="snap" type="button">Ambil Foto</button>
+          </div>
+        </div>
+
+        <div class="clock-form">
+          <div class="info-stack">
+            <div>
+              <b>Lokasi GPS</b>
+              <span id="geoStatus">-1.228552, 116.881761 (default)</span>
+            </div>
+            <div>
+              <b>Modal HRIS</b>
+              <span id="modalInfo">Login dulu untuk load opsi</span>
+            </div>
+            <div>
+              <b>Status Clock Out</b>
+              <span id="clockOutInfo">Belum dicek</span>
+            </div>
+          </div>
+
+          <button class="secondary" id="getLocation" type="button">Ambil GPS</button>
+          <button class="secondary" id="refreshClockOut" type="button">Cek Clock Out</button>
+
+          <div class="fix-box" id="fixBox" hidden>
+            <p class="hint strong">HRIS meminta clock-out kemarin dilengkapi dulu.</p>
+            <label>Clock Out Kemarin</label>
+            <input id="fixClockOutTime" type="text" placeholder="Contoh: 18:00">
+            <label>Alasan</label>
+            <input id="fixClockOutNote" type="text" placeholder="Contoh: Lupa clock out">
+          </div>
+
+          <div class="action-row">
+            <button class="danger" id="clockIn" type="button">Submit Clock In</button>
+            <button class="danger outline" id="clockOut" type="button">Submit Clock Out</button>
+          </div>
+          <p class="warning">Tombol clock-in/clock-out benar-benar mengirim absensi ke HRIS.</p>
+        </div>
+      </div>
+    </section>
+
+    <pre class="log card" id="log">Ready.</pre>
+  </main>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
