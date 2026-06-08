@@ -23,6 +23,7 @@ test('normalizes WhatsApp sender IDs', () => {
 test('normalizes WhatsApp phone numbers and group IDs', () => {
   assert.equal(normalizeWhatsappPhone('+62 812-3456-789'), '628123456789');
   assert.equal(normalizeWhatsappPhone('628123456789@s.whatsapp.net'), '628123456789');
+  assert.equal(normalizeWhatsappPhone('628123456789:12@s.whatsapp.net'), '628123456789');
   assert.equal(normalizeGroupJid('120363123456@g.us'), '120363123456@g.us');
   assert.equal(normalizeGroupJid(' 120363123456 '), '120363123456@g.us');
   assert.equal(normalizeGroupJid('12345-67890@g.us'), '12345-67890@g.us');

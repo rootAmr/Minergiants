@@ -9,6 +9,7 @@ module.exports = {
         APP_ALLOWED_ORIGINS: "https://absen.yuris.my.id",
         APP_DATA_DIR: "./data",
         HRIS_DEV_MODE: "false",
+        WHATSAPP_LOG_GROUP_MESSAGES: "false",
       },
     },
   ],
