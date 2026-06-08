@@ -35,6 +35,7 @@ function randomDefaultCoords(settings = {}) {
 const state = {
   appCsrfToken: '',
   appUser: null,
+  appUsers: [],
   setupRequired: false,
   appAuthenticated: false,
   csrfToken: '',
@@ -90,6 +91,14 @@ const els = {
   appWhatsappPhoneNumber: document.querySelector('#appWhatsappPhoneNumber'),
   saveAppProfile: document.querySelector('#saveAppProfile'),
   appLogout: document.querySelector('#appLogout'),
+  appAdminUsers: document.querySelector('#appAdminUsers'),
+  refreshAppUsers: document.querySelector('#refreshAppUsers'),
+  appUsersList: document.querySelector('#appUsersList'),
+  appNewUsername: document.querySelector('#appNewUsername'),
+  appNewDisplayName: document.querySelector('#appNewDisplayName'),
+  appNewWhatsappPhoneNumber: document.querySelector('#appNewWhatsappPhoneNumber'),
+  appNewPassword: document.querySelector('#appNewPassword'),
+  createAppUser: document.querySelector('#createAppUser'),
   loginForm: document.querySelector('#loginForm'),
   loginFields: document.querySelector('#loginFields'),
   email: document.querySelector('#email'),
@@ -203,6 +212,40 @@ function renderAppAuth() {
     : '-';
   els.appWhatsappPhoneNumber.value = state.appUser?.whatsappPhoneNumber || '';
   document.body.classList.toggle('app-ready', state.appAuthenticated);
+  renderAppUsers();
+}
+
+function renderAppUsers() {
+  const visible = state.appAuthenticated && state.appUser?.role === 'admin';
+  els.appAdminUsers.hidden = !visible;
+  els.appUsersList.replaceChildren();
+  if (!visible) return;
+
+  if (!state.appUsers.length) {
+    const empty = document.createElement('p');
+    empty.className = 'hint';
+    empty.textContent = 'Belum ada data user dimuat.';
+    els.appUsersList.append(empty);
+    return;
+  }
+
+  for (const user of state.appUsers) {
+    const item = document.createElement('div');
+    item.className = 'app-user-item';
+    const identity = document.createElement('b');
+    identity.textContent = `${user.displayName || user.username} (${user.username})`;
+    const phone = document.createElement('span');
+    phone.textContent = user.whatsappPhoneNumber || 'Nomor WhatsApp belum diisi';
+    item.append(identity, phone);
+    els.appUsersList.append(item);
+  }
+}
+
+function clearNewAppUserForm() {
+  els.appNewUsername.value = '';
+  els.appNewDisplayName.value = '';
+  els.appNewWhatsappPhoneNumber.value = '';
+  els.appNewPassword.value = '';
 }
 
 function setLoginVisible(visible) {
@@ -271,6 +314,17 @@ async function loadBootstrap() {
   renderAppAuth();
   setLoginVisible(true);
   return payload;
+}
+
+async function loadAppUsers() {
+  if (!state.appAuthenticated || state.appUser?.role !== 'admin') {
+    state.appUsers = [];
+    renderAppUsers();
+    return;
+  }
+  const payload = await api('/api/app/users');
+  state.appUsers = payload.users || [];
+  renderAppUsers();
 }
 
 function renderSettings() {
@@ -793,6 +847,7 @@ async function restoreSession() {
 async function initializeAuthenticatedApp() {
   loadUserUiPreferences();
   renderAppAuth();
+  await loadAppUsers().catch((error) => log(`Load user gagal: ${error.message}`));
   await loadSettings().catch((error) => log(error.message));
   await loadPhotos().catch((error) => log(`Load foto gagal: ${error.message}`));
   renderLocations();
@@ -838,8 +893,38 @@ els.saveAppProfile.addEventListener('click', async () => {
       body: JSON.stringify({ whatsappPhoneNumber: els.appWhatsappPhoneNumber.value.trim() }),
     });
     state.appUser = payload.appUser || state.appUser;
+    await loadAppUsers().catch((error) => log(`Load user gagal: ${error.message}`));
     renderAppAuth();
     log('Profil aplikasi tersimpan.', payload.appUser);
+  } catch (error) {
+    log(error.message);
+  }
+});
+
+els.refreshAppUsers.addEventListener('click', async () => {
+  try {
+    await loadAppUsers();
+    log('Daftar user dimuat ulang.');
+  } catch (error) {
+    log(error.message);
+  }
+});
+
+els.createAppUser.addEventListener('click', async () => {
+  try {
+    const payload = await api('/api/app/users', {
+      method: 'POST',
+      body: JSON.stringify({
+        username: els.appNewUsername.value.trim(),
+        displayName: els.appNewDisplayName.value.trim(),
+        whatsappPhoneNumber: els.appNewWhatsappPhoneNumber.value.trim(),
+        password: els.appNewPassword.value,
+      }),
+    });
+    state.appUsers = payload.users || state.appUsers;
+    clearNewAppUserForm();
+    renderAppUsers();
+    log('User aplikasi ditambahkan.', payload.appUser);
   } catch (error) {
     log(error.message);
   }
@@ -853,6 +938,7 @@ els.appLogout.addEventListener('click', async () => {
   }
   state.appCsrfToken = '';
   state.appUser = null;
+  state.appUsers = [];
   state.appAuthenticated = false;
   state.csrfToken = '';
   state.photos = [];

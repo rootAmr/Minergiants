@@ -39,6 +39,24 @@
             <button class="secondary compact" id="saveAppProfile" type="button">Simpan Profil</button>
             <button class="secondary compact ghost" id="appLogout" type="button">Logout App</button>
           </div>
+          <div class="admin-users" id="appAdminUsers" hidden>
+            <div class="admin-users-head">
+              <b>User WhatsApp</b>
+              <button class="secondary compact" id="refreshAppUsers" type="button">Refresh</button>
+            </div>
+            <div class="app-users-list" id="appUsersList"></div>
+            <div class="admin-user-form">
+              <label>Username user baru</label>
+              <input id="appNewUsername" type="text" autocomplete="off" placeholder="username">
+              <label>Nama tampilan</label>
+              <input id="appNewDisplayName" type="text" autocomplete="off" placeholder="Nama user">
+              <label>Nomor WhatsApp user</label>
+              <input id="appNewWhatsappPhoneNumber" type="tel" autocomplete="off" placeholder="+628123456789">
+              <label>Password awal</label>
+              <input id="appNewPassword" type="password" autocomplete="new-password" placeholder="Minimal 8 karakter">
+              <button class="secondary" id="createAppUser" type="button">Tambah User</button>
+            </div>
+          </div>
         </div>
         <div class="session-actions">
           <button class="secondary compact" id="refreshSession" type="button" hidden>Refresh</button>

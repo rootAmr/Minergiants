@@ -189,6 +189,26 @@ test('unauthorized WhatsApp command does not trigger submission', async () => {
   assert.equal(submitted, false);
 });
 
+test('authorized unknown WhatsApp message is ignored without reply', async () => {
+  let submitted = false;
+  const reply = await handleWhatsappCommand({
+    senderJid: '628111@s.whatsapp.net',
+    text: 'ini cuma chat biasa',
+    settings: { whatsappAuthorizedSenders: ['+628111'] },
+    deps: {
+      storeClockIn: async () => {
+        submitted = true;
+      },
+      storeClockOut: async () => {
+        submitted = true;
+      },
+    },
+  });
+
+  assert.equal(reply, null);
+  assert.equal(submitted, false);
+});
+
 test('authorized explicit clock-in command submits once with selected photo', async () => {
   const calls = [];
   const reply = await handleWhatsappCommand({

@@ -155,6 +155,46 @@ h2 { font-size: 22px; }
   font-weight: 700;
 }
 
+.admin-users {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.admin-users[hidden] { display: none; }
+
+.admin-users-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.app-users-list {
+  display: grid;
+  gap: 8px;
+}
+
+.app-user-item {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.app-user-item span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.admin-user-form .secondary {
+  width: 100%;
+  margin-top: 14px;
+}
+
 .status-pill {
   white-space: nowrap;
   border-radius: 999px;
