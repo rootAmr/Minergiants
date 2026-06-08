@@ -9,6 +9,7 @@ import {
   normalizeSenderJid,
   normalizeWhatsappPhone,
   parseWhatsappCommand,
+  resolveParticipantSenderJid,
   resolveWhatsappPhoneUser,
   resolveWhatsappSenderUser,
   sendReminders,
@@ -92,6 +93,41 @@ test('ignores unmatched WhatsApp participant phone', () => {
   ]);
 
   assert.equal(resolved.type, 'none');
+});
+
+test('resolves WhatsApp LID participant to phone JID before user matching', async () => {
+  const socket = {
+    signalRepository: {
+      lidMapping: {
+        getPNForLID: async (lid) => {
+          assert.equal(lid, '154833722044599@lid');
+          return '628115430120:0@s.whatsapp.net';
+        },
+      },
+    },
+  };
+  const users = [
+    { user: { id: 1, whatsappPhoneNumber: '628115430120' }, settings: {} },
+  ];
+
+  const senderJid = await resolveParticipantSenderJid(socket, '154833722044599@lid');
+  const resolved = resolveWhatsappPhoneUser(senderJid, users);
+
+  assert.equal(senderJid, '628115430120:0@s.whatsapp.net');
+  assert.equal(resolved.type, 'matched');
+  assert.equal(resolved.user.id, 1);
+  assert.equal(resolved.phoneNumber, '628115430120');
+});
+
+test('unmapped WhatsApp LID participant is not treated as a phone number', async () => {
+  const senderJid = await resolveParticipantSenderJid({}, '154833722044599@lid');
+  const resolved = resolveWhatsappPhoneUser(senderJid, [
+    { user: { id: 1, whatsappPhoneNumber: '154833722044599' }, settings: {} },
+  ]);
+
+  assert.equal(senderJid, '154833722044599@lid');
+  assert.equal(resolved.type, 'none');
+  assert.equal(resolved.phoneNumber, '');
 });
 
 test('parses WhatsApp bot commands', () => {
