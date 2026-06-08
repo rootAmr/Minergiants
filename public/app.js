@@ -86,6 +86,7 @@ const els = {
   appPassword: document.querySelector('#appPassword'),
   appSetupFields: document.querySelector('#appSetupFields'),
   appAuthSubmit: document.querySelector('#appAuthSubmit'),
+  accountSections: document.querySelector('#accountSections'),
   appProfile: document.querySelector('#appProfile'),
   appProfileInfo: document.querySelector('#appProfileInfo'),
   appWhatsappPhoneNumber: document.querySelector('#appWhatsappPhoneNumber'),
@@ -201,8 +202,10 @@ function coordsForSubmission() {
 }
 
 function renderAppAuth() {
-  els.appAuthForm.hidden = state.appAuthenticated;
-  els.appProfile.hidden = !state.appAuthenticated;
+  const appReady = state.appAuthenticated;
+  els.appAuthForm.hidden = appReady;
+  els.accountSections.hidden = !appReady;
+  els.appProfile.hidden = !appReady;
   els.appSetupFields.hidden = !state.setupRequired;
   els.appAuthTitle.textContent = state.setupRequired ? 'Setup Admin Aplikasi' : 'Login Aplikasi';
   els.appAuthSubmit.textContent = state.setupRequired ? 'Buat Admin' : 'Login Aplikasi';
@@ -211,7 +214,7 @@ function renderAppAuth() {
     ? `${state.appUser.displayName || state.appUser.username} (${state.appUser.role})`
     : '-';
   els.appWhatsappPhoneNumber.value = state.appUser?.whatsappPhoneNumber || '';
-  document.body.classList.toggle('app-ready', state.appAuthenticated);
+  document.body.classList.toggle('app-ready', appReady);
   renderAppUsers();
 }
 
@@ -250,13 +253,15 @@ function clearNewAppUserForm() {
 
 function setLoginVisible(visible) {
   const showHrisLogin = visible && state.appAuthenticated;
+  const hrisReady = state.appAuthenticated && !visible;
   els.loginForm.hidden = !showHrisLogin;
   els.loginFields.hidden = !showHrisLogin;
   els.email.required = showHrisLogin;
   els.password.required = showHrisLogin;
   els.refreshSession.hidden = visible || !state.appAuthenticated;
   els.logout.hidden = visible || !state.appAuthenticated;
-  document.body.classList.toggle('session-ready', state.appAuthenticated && !visible);
+  document.body.classList.toggle('session-ready', hrisReady);
+  document.body.classList.toggle('hris-login-visible', showHrisLogin);
 }
 
 function resetHrisState() {

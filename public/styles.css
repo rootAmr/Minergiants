@@ -14,6 +14,8 @@
 
 * { box-sizing: border-box; }
 
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -93,17 +95,7 @@ h2 { font-size: 22px; }
   display: grid;
   gap: 12px;
   justify-items: end;
-}
-
-.session-card {
-  display: grid;
-  grid-template-columns: auto auto;
-  gap: 10px;
-  align-items: center;
-  padding: 8px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.5);
+  width: min(380px, 100%);
 }
 
 .session-actions {
@@ -111,10 +103,11 @@ h2 { font-size: 22px; }
   gap: 6px;
   flex-wrap: nowrap;
   justify-content: flex-end;
+  width: 100%;
 }
 
 .hero-login {
-  width: min(360px, 100%);
+  width: 100%;
   padding: 16px;
   border: 1px solid var(--line);
   border-radius: 22px;
@@ -122,22 +115,48 @@ h2 { font-size: 22px; }
 }
 
 .hero-login label:first-child { margin-top: 0; }
-.hero-login h2 { margin-bottom: 12px; }
+.hero-login h2 { margin-bottom: 8px; }
 .hero-login .primary { margin-top: 14px; }
 
-.app-profile {
+.form-copy,
+.section-copy {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.form-copy { font-size: 0.94rem; }
+.section-copy { font-size: 0.9rem; }
+
+.account-grid {
   display: grid;
-  gap: 10px;
-  width: min(360px, 100%);
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.52);
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 18px;
+  align-items: start;
+  margin-top: 18px;
+}
+
+.account-card {
+  padding: 24px;
+  animation: rise 540ms ease both;
+}
+
+.app-profile,
+.admin-users {
+  display: grid;
+  gap: 16px;
 }
 
 .app-profile-main {
   display: grid;
-  gap: 8px;
+  gap: 12px;
+}
+
+.profile-summary {
+  padding: 14px;
+  border: 1px solid rgba(36, 66, 53, 0.18);
+  border-radius: 18px;
+  background: rgba(199, 255, 99, 0.18);
 }
 
 .app-profile-main label {
@@ -148,6 +167,7 @@ h2 { font-size: 22px; }
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .app-profile span {
@@ -155,20 +175,16 @@ h2 { font-size: 22px; }
   font-weight: 700;
 }
 
-.admin-users {
-  display: grid;
-  gap: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
-}
-
-.admin-users[hidden] { display: none; }
-
 .admin-users-head {
   display: flex;
-  gap: 8px;
-  align-items: center;
+  gap: 12px;
+  align-items: flex-start;
   justify-content: space-between;
+}
+
+.admin-users-head .section-title {
+  flex: 1;
+  margin-bottom: 0;
 }
 
 .app-users-list {
@@ -190,9 +206,22 @@ h2 { font-size: 22px; }
   font-size: 0.9rem;
 }
 
+.admin-user-form {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-user-form label {
+  margin: 0;
+}
+
+.admin-user-form input {
+  margin-top: 8px;
+}
+
 .admin-user-form .secondary {
   width: 100%;
-  margin-top: 14px;
+  margin-top: 4px;
 }
 
 .status-pill {
@@ -290,6 +319,7 @@ body:not(.session-ready) .log {
   font-size: 0.78rem;
 }
 
+.section-title.small h2,
 .section-title.small h3 {
   margin: 0;
   color: var(--forest);
@@ -750,19 +780,28 @@ video, #preview {
   background: #17241e;
 }
 
+@media (min-width: 841px) {
+  .admin-user-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-user-form .secondary {
+    grid-column: 1 / -1;
+  }
+}
+
 @keyframes rise {
   from { opacity: 0; transform: translateY(16px) scale(0.99); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 @media (max-width: 840px) {
-  .hero, .grid, .clock-grid, .clock-main-grid, .hris-strip { grid-template-columns: 1fr; }
+  .hero, .account-grid, .grid, .clock-grid, .clock-main-grid, .hris-strip { grid-template-columns: 1fr; }
   .session-ready #loginForm[hidden] + .panel { grid-template-columns: 1fr; }
   .hero { display: grid; }
-  .hero-actions { justify-items: stretch; }
-  .session-card { grid-template-columns: 1fr; border-radius: 24px; }
+  .hero-actions { justify-items: stretch; width: 100%; }
   .session-actions { justify-content: flex-start; flex-wrap: wrap; }
-  .camera-actions, .photo-save-row, .saved-photos-head, .saved-photos-actions, .schedule-toggle-row, .info-stack div { flex-direction: column; }
+  .admin-users-head, .camera-actions, .photo-save-row, .saved-photos-head, .saved-photos-actions, .schedule-toggle-row, .info-stack div { flex-direction: column; }
   .schedule-toggle-actions { width: 100%; justify-content: flex-start; }
   .photo-list, .camera-preview-grid, .schedule-group-head, .time-range, .utility-actions { grid-template-columns: 1fr; }
   .action-row { grid-template-columns: 1fr; }

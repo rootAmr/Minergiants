@@ -18,6 +18,7 @@
       <div class="hero-actions">
         <form class="hero-login" id="appAuthForm">
           <h2 id="appAuthTitle">Login Aplikasi</h2>
+          <p class="form-copy">Masuk ke aplikasi helper sebelum menghubungkan HRIS.</p>
           <label>Username aplikasi</label>
           <input id="appUsername" type="text" autocomplete="username" placeholder="username" required>
           <div id="appSetupFields" hidden>
@@ -28,41 +29,13 @@
           <input id="appPassword" type="password" autocomplete="current-password" placeholder="Minimal 8 karakter" required>
           <button class="primary" id="appAuthSubmit" type="submit">Login Aplikasi</button>
         </form>
-        <div class="app-profile" id="appProfile" hidden>
-          <div class="app-profile-main">
-            <span id="appProfileInfo">-</span>
-            <label>Nomor WhatsApp kamu
-              <input id="appWhatsappPhoneNumber" type="tel" autocomplete="tel" placeholder="+628123456789">
-            </label>
-          </div>
-          <div class="app-profile-actions">
-            <button class="secondary compact" id="saveAppProfile" type="button">Simpan Profil</button>
-            <button class="secondary compact ghost" id="appLogout" type="button">Logout App</button>
-          </div>
-          <div class="admin-users" id="appAdminUsers" hidden>
-            <div class="admin-users-head">
-              <b>User WhatsApp</b>
-              <button class="secondary compact" id="refreshAppUsers" type="button">Refresh</button>
-            </div>
-            <div class="app-users-list" id="appUsersList"></div>
-            <div class="admin-user-form">
-              <label>Username user baru</label>
-              <input id="appNewUsername" type="text" autocomplete="off" placeholder="username">
-              <label>Nama tampilan</label>
-              <input id="appNewDisplayName" type="text" autocomplete="off" placeholder="Nama user">
-              <label>Nomor WhatsApp user</label>
-              <input id="appNewWhatsappPhoneNumber" type="tel" autocomplete="off" placeholder="+628123456789">
-              <label>Password awal</label>
-              <input id="appNewPassword" type="password" autocomplete="new-password" placeholder="Minimal 8 karakter">
-              <button class="secondary" id="createAppUser" type="button">Tambah User</button>
-            </div>
-          </div>
-        </div>
         <div class="session-actions">
           <button class="secondary compact" id="refreshSession" type="button" hidden>Refresh</button>
           <button class="secondary compact ghost" id="logout" type="button" hidden>Logout HRIS</button>
         </div>
         <form class="hero-login" id="loginForm" hidden>
+          <h2>Login HRIS</h2>
+          <p class="form-copy">Gunakan akun MConnect HRIS untuk membuka workspace clock-in.</p>
           <div id="loginFields">
             <label>Email HRIS</label>
             <input id="email" type="email" autocomplete="username" placeholder="nama@perusahaan.com" required>
@@ -72,6 +45,59 @@
           </div>
         </form>
       </div>
+    </section>
+
+    <section class="account-grid" id="accountSections" hidden>
+      <section class="card account-card app-profile" id="appProfile" hidden>
+        <div class="section-title small">
+          <span>ME</span>
+          <div>
+            <h2>Profil Aplikasi</h2>
+            <p class="section-copy">Nomor WhatsApp ini dipakai untuk mengenali command pribadi dari bot.</p>
+          </div>
+        </div>
+        <div class="app-profile-main">
+          <div class="profile-summary">
+            <span id="appProfileInfo">-</span>
+          </div>
+          <label>Nomor WhatsApp pribadi
+            <input id="appWhatsappPhoneNumber" type="tel" autocomplete="tel" placeholder="+628123456789">
+          </label>
+        </div>
+        <div class="app-profile-actions">
+          <button class="secondary compact" id="saveAppProfile" type="button">Simpan Profil</button>
+          <button class="secondary compact ghost" id="appLogout" type="button">Logout Aplikasi</button>
+        </div>
+      </section>
+
+      <section class="card account-card admin-users" id="appAdminUsers" hidden>
+        <div class="admin-users-head">
+          <div class="section-title small">
+            <span>AD</span>
+            <div>
+              <h2>User Management</h2>
+              <p class="section-copy">Khusus admin aplikasi. Kelola user dan nomor WhatsApp yang boleh memakai bot.</p>
+            </div>
+          </div>
+          <button class="secondary compact" id="refreshAppUsers" type="button">Refresh</button>
+        </div>
+        <div class="app-users-list" id="appUsersList"></div>
+        <div class="admin-user-form">
+          <label>Username user baru
+            <input id="appNewUsername" type="text" autocomplete="off" placeholder="username">
+          </label>
+          <label>Nama tampilan
+            <input id="appNewDisplayName" type="text" autocomplete="off" placeholder="Nama user">
+          </label>
+          <label>Nomor WhatsApp user
+            <input id="appNewWhatsappPhoneNumber" type="tel" autocomplete="off" placeholder="+628123456789">
+          </label>
+          <label>Password awal
+            <input id="appNewPassword" type="password" autocomplete="new-password" placeholder="Minimal 8 karakter">
+          </label>
+          <button class="secondary" id="createAppUser" type="button">Tambah User</button>
+        </div>
+      </section>
     </section>
 
     <section class="card hris-strip">
