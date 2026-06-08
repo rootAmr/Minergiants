@@ -7,10 +7,15 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "check": "node --check server.js && node --check public/app.js && node --check tests/parser-schedule.test.js",
+    "check": "node --check server.js && node --check public/app.js && node --check lib/whatsapp-bot.js && node --check tests/parser-schedule.test.js && node --check tests/whatsapp-bot.test.js && node --check tests/app-auth.test.js",
     "test": "node --test"
   },
   "engines": {
     "node": ">=24"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc13",
+    "pino": "^10.3.1",
+    "qrcode-terminal": "^0.12.0"
   }
 }

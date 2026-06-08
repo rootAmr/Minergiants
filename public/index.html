@@ -16,17 +16,41 @@
         <p class="lead">Login ke HRIS, pilih default location, pakai GPS default/browser dan foto webcam, lalu submit clock-in dari satu halaman.</p>
       </div>
       <div class="hero-actions">
+        <form class="hero-login" id="appAuthForm">
+          <h2 id="appAuthTitle">Login Aplikasi</h2>
+          <label>Username aplikasi</label>
+          <input id="appUsername" type="text" autocomplete="username" placeholder="username" required>
+          <div id="appSetupFields" hidden>
+            <label>Nama tampilan</label>
+            <input id="appDisplayName" type="text" autocomplete="name" placeholder="Nama kamu">
+          </div>
+          <label>Password aplikasi</label>
+          <input id="appPassword" type="password" autocomplete="current-password" placeholder="Minimal 8 karakter" required>
+          <button class="primary" id="appAuthSubmit" type="submit">Login Aplikasi</button>
+        </form>
+        <div class="app-profile" id="appProfile" hidden>
+          <div class="app-profile-main">
+            <span id="appProfileInfo">-</span>
+            <label>Nomor WhatsApp kamu
+              <input id="appWhatsappPhoneNumber" type="tel" autocomplete="tel" placeholder="+628123456789">
+            </label>
+          </div>
+          <div class="app-profile-actions">
+            <button class="secondary compact" id="saveAppProfile" type="button">Simpan Profil</button>
+            <button class="secondary compact ghost" id="appLogout" type="button">Logout App</button>
+          </div>
+        </div>
         <div class="session-actions">
           <button class="secondary compact" id="refreshSession" type="button" hidden>Refresh</button>
-          <button class="secondary compact ghost" id="logout" type="button" hidden>Logout</button>
+          <button class="secondary compact ghost" id="logout" type="button" hidden>Logout HRIS</button>
         </div>
-        <form class="hero-login" id="loginForm">
+        <form class="hero-login" id="loginForm" hidden>
           <div id="loginFields">
-            <label>Email</label>
+            <label>Email HRIS</label>
             <input id="email" type="email" autocomplete="username" placeholder="nama@perusahaan.com" required>
-            <label>Password</label>
+            <label>Password HRIS</label>
             <input id="password" type="password" autocomplete="current-password" placeholder="Password HRIS" required>
-            <button class="primary" type="submit">Login</button>
+            <button class="primary" type="submit">Login HRIS</button>
           </div>
         </form>
       </div>
@@ -55,7 +79,7 @@
       <section class="card panel schedule-panel">
         <div class="section-title">
           <span>01</span>
-          <h2>Jadwal Otomatis</h2>
+          <h2>Reminder Lokal</h2>
         </div>
         <div class="schedule-toggle-row">
           <span id="scheduleInfo">Jadwal nonaktif</span>
@@ -93,6 +117,41 @@
 
           <button class="secondary" id="saveSchedule" type="button">Simpan Jadwal</button>
         </div>
+      </section>
+
+      <section class="card panel whatsapp-panel">
+        <div class="section-title">
+          <span>WA</span>
+          <h2>WhatsApp Bot</h2>
+        </div>
+        <div class="schedule-toggle-row">
+          <span id="whatsappInfo">Bot nonaktif</span>
+          <div class="schedule-toggle-actions">
+            <button class="toggle compact" id="whatsappBotEnabled" type="button" aria-pressed="false">Bot: OFF</button>
+            <button class="toggle compact" id="whatsappReminderEnabled" type="button" aria-pressed="true">Reminder: ON</button>
+          </div>
+        </div>
+        <label>WhatsApp Group JID</label>
+        <input id="whatsappGroupJid" type="text" placeholder="Contoh: 120363xxxxxxxx@g.us">
+        <p class="hint">Bot hanya memproses command dari group ini. Setiap user harus menyimpan nomor WhatsApp sendiri di profil aplikasi.</p>
+        <label>Reminder sebelum target (menit)</label>
+        <input id="whatsappReminderLeadMinutes" type="number" min="1" max="60" value="5">
+        <div class="schedule-group">
+          <div class="schedule-group-head"><b>Target Clock In</b></div>
+          <div class="time-range">
+            <label>Dari <input id="whatsappClockInTargetStartTime" type="time" value="08:55"></label>
+            <label>Sampai <input id="whatsappClockInTargetEndTime" type="time" value="09:10"></label>
+          </div>
+        </div>
+        <div class="schedule-group">
+          <div class="schedule-group-head"><b>Target Clock Out</b></div>
+          <div class="time-range">
+            <label>Dari <input id="whatsappClockOutTargetStartTime" type="time" value="17:55"></label>
+            <label>Sampai <input id="whatsappClockOutTargetEndTime" type="time" value="18:10"></label>
+          </div>
+        </div>
+        <button class="secondary" id="saveWhatsappSettings" type="button">Simpan WhatsApp</button>
+        <p class="hint">Scan QR di terminal setelah bot aktif. WhatsApp hanya mengirim reminder; submit HRIS tetap perlu command eksplisit.</p>
       </section>
     </section>
 
@@ -189,6 +248,7 @@
             <button class="danger outline" id="clockOut" type="button">Submit Clock Out</button>
           </div>
           <p class="warning">Tombol clock-in/clock-out benar-benar mengirim absensi ke HRIS.</p>
+          <p class="hint">Jika aplikasi ini dipasang di server pusat, request HRIS tetap keluar dari jaringan/IP server tersebut.</p>
         </div>
       </div>
     </section>

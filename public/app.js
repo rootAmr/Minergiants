@@ -4,9 +4,39 @@ const DEFAULT_COORDS = {
   accuracy: null,
   source: 'default',
 };
+const DEFAULT_COORD_RADIUS_METERS = 5;
+const METERS_PER_DEGREE_LATITUDE = 111_320;
+
+function randomCoordinateInRange(latitude, longitude, radiusMeters = DEFAULT_COORD_RADIUS_METERS, random = Math.random) {
+  const baseLatitude = Number.isFinite(Number(latitude)) ? Number(latitude) : DEFAULT_COORDS.latitude;
+  const baseLongitude = Number.isFinite(Number(longitude)) ? Number(longitude) : DEFAULT_COORDS.longitude;
+  const radius = Math.max(0, Number(radiusMeters) || 0);
+  const distance = Math.sqrt(random()) * radius;
+  const angle = random() * 2 * Math.PI;
+  const latitudeOffset = (Math.cos(angle) * distance) / METERS_PER_DEGREE_LATITUDE;
+  const longitudeScale = METERS_PER_DEGREE_LATITUDE * Math.max(0.01, Math.abs(Math.cos((baseLatitude * Math.PI) / 180)));
+  const longitudeOffset = (Math.sin(angle) * distance) / longitudeScale;
+
+  return {
+    latitude: Number((baseLatitude + latitudeOffset).toFixed(7)),
+    longitude: Number((baseLongitude + longitudeOffset).toFixed(7)),
+    accuracy: radius,
+    source: 'default',
+  };
+}
+
+function randomDefaultCoords(settings = {}) {
+  return randomCoordinateInRange(
+    settings.officeLatitude || DEFAULT_COORDS.latitude,
+    settings.officeLongitude || DEFAULT_COORDS.longitude,
+  );
+}
 
 const state = {
   appCsrfToken: '',
+  appUser: null,
+  setupRequired: false,
+  appAuthenticated: false,
   csrfToken: '',
   locations: [],
   settings: {
@@ -23,8 +53,17 @@ const state = {
     checkInEndTime: '09:00',
     checkOutStartTime: '17:45',
     checkOutEndTime: '18:15',
+    whatsappBotEnabled: false,
+    whatsappReminderEnabled: true,
+    whatsappGroupJid: '',
+    whatsappAuthorizedSenders: [],
+    whatsappReminderLeadMinutes: 5,
+    whatsappClockInTargetStartTime: '08:55',
+    whatsappClockInTargetEndTime: '09:10',
+    whatsappClockOutTargetStartTime: '17:55',
+    whatsappClockOutTargetEndTime: '18:10',
   },
-  coords: { ...DEFAULT_COORDS },
+  coords: randomDefaultCoords(),
   imageBase64: '',
   selectedPhotoId: '',
   randomPhotoEnabled: false,
@@ -32,13 +71,25 @@ const state = {
   modal: null,
   clockOutOptions: null,
   scheduledAction: '',
-  scheduleDetailsExpanded: localStorage.getItem('hris-schedule-details-expanded') !== '0',
+  scheduleDetailsExpanded: true,
   photoSettingsSaveId: 0,
   photoSettingsSaveQueue: Promise.resolve(),
   stream: null,
 };
 
 const els = {
+  appAuthForm: document.querySelector('#appAuthForm'),
+  appAuthTitle: document.querySelector('#appAuthTitle'),
+  appUsername: document.querySelector('#appUsername'),
+  appDisplayName: document.querySelector('#appDisplayName'),
+  appPassword: document.querySelector('#appPassword'),
+  appSetupFields: document.querySelector('#appSetupFields'),
+  appAuthSubmit: document.querySelector('#appAuthSubmit'),
+  appProfile: document.querySelector('#appProfile'),
+  appProfileInfo: document.querySelector('#appProfileInfo'),
+  appWhatsappPhoneNumber: document.querySelector('#appWhatsappPhoneNumber'),
+  saveAppProfile: document.querySelector('#saveAppProfile'),
+  appLogout: document.querySelector('#appLogout'),
   loginForm: document.querySelector('#loginForm'),
   loginFields: document.querySelector('#loginFields'),
   email: document.querySelector('#email'),
@@ -68,6 +119,16 @@ const els = {
   checkOutStartTime: document.querySelector('#checkOutStartTime'),
   checkOutEndTime: document.querySelector('#checkOutEndTime'),
   saveSchedule: document.querySelector('#saveSchedule'),
+  whatsappBotEnabled: document.querySelector('#whatsappBotEnabled'),
+  whatsappReminderEnabled: document.querySelector('#whatsappReminderEnabled'),
+  whatsappInfo: document.querySelector('#whatsappInfo'),
+  whatsappGroupJid: document.querySelector('#whatsappGroupJid'),
+  whatsappReminderLeadMinutes: document.querySelector('#whatsappReminderLeadMinutes'),
+  whatsappClockInTargetStartTime: document.querySelector('#whatsappClockInTargetStartTime'),
+  whatsappClockInTargetEndTime: document.querySelector('#whatsappClockInTargetEndTime'),
+  whatsappClockOutTargetStartTime: document.querySelector('#whatsappClockOutTargetStartTime'),
+  whatsappClockOutTargetEndTime: document.querySelector('#whatsappClockOutTargetEndTime'),
+  saveWhatsappSettings: document.querySelector('#saveWhatsappSettings'),
   cameraBox: document.querySelector('#cameraBox'),
   startCamera: document.querySelector('#startCamera'),
   snap: document.querySelector('#snap'),
@@ -93,6 +154,22 @@ const els = {
   log: document.querySelector('#log'),
 };
 
+function appStorageKey(key) {
+  return state.appUser?.id ? `hris:${state.appUser.id}:${key}` : `hris:guest:${key}`;
+}
+
+function getUserStorage(key) {
+  return localStorage.getItem(appStorageKey(key));
+}
+
+function setUserStorage(key, value) {
+  localStorage.setItem(appStorageKey(key), value);
+}
+
+function loadUserUiPreferences() {
+  state.scheduleDetailsExpanded = getUserStorage('schedule-details-expanded') !== '0';
+}
+
 function log(message, data) {
   const time = new Date().toLocaleTimeString('id-ID');
   const extra = data ? `\n${JSON.stringify(data, null, 2)}` : '';
@@ -100,18 +177,43 @@ function log(message, data) {
 }
 
 function renderGeoStatus() {
-  const suffix = state.coords.source === 'default' ? ' (default)' : '';
+  const suffix = state.coords.source === 'default' ? ` (default ±${DEFAULT_COORD_RADIUS_METERS}m)` : '';
   els.geoStatus.textContent = `${state.coords.latitude.toFixed(6)}, ${state.coords.longitude.toFixed(6)}${suffix}`;
 }
 
+function refreshDefaultCoords() {
+  state.coords = randomDefaultCoords(state.settings);
+  renderGeoStatus();
+  return state.coords;
+}
+
+function coordsForSubmission() {
+  return !state.coords || state.coords.source === 'default' ? refreshDefaultCoords() : state.coords;
+}
+
+function renderAppAuth() {
+  els.appAuthForm.hidden = state.appAuthenticated;
+  els.appProfile.hidden = !state.appAuthenticated;
+  els.appSetupFields.hidden = !state.setupRequired;
+  els.appAuthTitle.textContent = state.setupRequired ? 'Setup Admin Aplikasi' : 'Login Aplikasi';
+  els.appAuthSubmit.textContent = state.setupRequired ? 'Buat Admin' : 'Login Aplikasi';
+  els.appPassword.autocomplete = state.setupRequired ? 'new-password' : 'current-password';
+  els.appProfileInfo.textContent = state.appUser
+    ? `${state.appUser.displayName || state.appUser.username} (${state.appUser.role})`
+    : '-';
+  els.appWhatsappPhoneNumber.value = state.appUser?.whatsappPhoneNumber || '';
+  document.body.classList.toggle('app-ready', state.appAuthenticated);
+}
+
 function setLoginVisible(visible) {
-  els.loginForm.hidden = !visible;
-  els.loginFields.hidden = !visible;
-  els.email.required = visible;
-  els.password.required = visible;
-  els.refreshSession.hidden = visible;
-  els.logout.hidden = visible;
-  document.body.classList.toggle('session-ready', !visible);
+  const showHrisLogin = visible && state.appAuthenticated;
+  els.loginForm.hidden = !showHrisLogin;
+  els.loginFields.hidden = !showHrisLogin;
+  els.email.required = showHrisLogin;
+  els.password.required = showHrisLogin;
+  els.refreshSession.hidden = visible || !state.appAuthenticated;
+  els.logout.hidden = visible || !state.appAuthenticated;
+  document.body.classList.toggle('session-ready', state.appAuthenticated && !visible);
 }
 
 function resetHrisState() {
@@ -162,11 +264,18 @@ async function api(path, options = {}) {
 async function loadBootstrap() {
   const payload = await api('/api/bootstrap');
   state.appCsrfToken = payload.appCsrfToken || '';
+  state.appUser = payload.appUser || null;
+  state.setupRequired = Boolean(payload.setupRequired);
+  state.appAuthenticated = Boolean(payload.authenticated);
+  if (state.appAuthenticated) loadUserUiPreferences();
+  renderAppAuth();
+  setLoginVisible(true);
+  return payload;
 }
 
 function renderSettings() {
-  const storedRandomPhoto = localStorage.getItem('hris-random-photo-enabled');
-  const storedSelectedPhotoId = localStorage.getItem('hris-selected-photo-id');
+  const storedRandomPhoto = getUserStorage('random-photo-enabled');
+  const storedSelectedPhotoId = getUserStorage('selected-photo-id');
   state.randomPhotoEnabled = storedRandomPhoto !== null
     ? storedRandomPhoto === '1'
     : Boolean(state.settings.randomPhotoEnabled);
@@ -178,6 +287,7 @@ function renderSettings() {
   els.officeCoords.textContent = `${state.settings.officeLatitude || DEFAULT_COORDS.latitude}, ${state.settings.officeLongitude || DEFAULT_COORDS.longitude}`;
   renderGeoStatus();
   renderSchedule();
+  renderWhatsappSettings();
   renderPhotos();
 }
 
@@ -211,7 +321,27 @@ function renderSchedule() {
 
   const checkInTarget = getScheduleTime('clock-in');
   const checkOutTarget = getScheduleTime('clock-out');
-  els.scheduleInfo.textContent = `Aktif: check-in ${checkInTarget}, check-out ${checkOutTarget}`;
+  els.scheduleInfo.textContent = `Reminder lokal: check-in ${checkInTarget}, check-out ${checkOutTarget}`;
+}
+
+function renderWhatsappSettings() {
+  const botEnabled = Boolean(state.settings.whatsappBotEnabled);
+  const reminderEnabled = state.settings.whatsappReminderEnabled !== false;
+  const groupJid = state.settings.whatsappGroupJid || '';
+
+  renderToggle(els.whatsappBotEnabled, botEnabled, 'Bot');
+  renderToggle(els.whatsappReminderEnabled, reminderEnabled, 'Reminder');
+  els.whatsappGroupJid.value = groupJid;
+  els.whatsappReminderLeadMinutes.value = String(state.settings.whatsappReminderLeadMinutes || 5);
+  els.whatsappClockInTargetStartTime.value = normalizeTime(state.settings.whatsappClockInTargetStartTime, '08:55');
+  els.whatsappClockInTargetEndTime.value = normalizeTime(state.settings.whatsappClockInTargetEndTime, '09:10');
+  els.whatsappClockOutTargetStartTime.value = normalizeTime(state.settings.whatsappClockOutTargetStartTime, '17:55');
+  els.whatsappClockOutTargetEndTime.value = normalizeTime(state.settings.whatsappClockOutTargetEndTime, '18:10');
+  els.whatsappInfo.textContent = botEnabled
+    ? groupJid
+      ? `Bot aktif untuk group ${groupJid}`
+      : 'Bot aktif, isi Group JID lalu simpan'
+    : 'Bot nonaktif';
 }
 
 function renderToggle(element, enabled, label) {
@@ -222,15 +352,15 @@ function renderToggle(element, enabled, label) {
 
 function todayKey(action, targetTime) {
   const date = new Date().toLocaleDateString('en-CA');
-  return `hris-schedule:${date}:${action}:${targetTime}`;
+  return `schedule:${date}:${action}:${targetTime}`;
 }
 
 function alreadyPrompted(action, targetTime) {
-  return localStorage.getItem(todayKey(action, targetTime)) === '1';
+  return getUserStorage(todayKey(action, targetTime)) === '1';
 }
 
 function markPrompted(action, targetTime) {
-  localStorage.setItem(todayKey(action, targetTime), '1');
+  setUserStorage(todayKey(action, targetTime), '1');
 }
 
 function normalizeTime(value, fallback) {
@@ -258,11 +388,11 @@ function dailyRandomTarget(action, startTime, endTime) {
   const start = minutesFromTime(startTime, '09:00');
   const end = Math.max(start, minutesFromTime(endTime, startTime));
   const date = new Date().toLocaleDateString('en-CA');
-  const key = `hris-random-target:${date}:${action}:${startTime}-${endTime}`;
-  const saved = localStorage.getItem(key);
+  const key = `random-target:${date}:${action}:${startTime}-${endTime}`;
+  const saved = getUserStorage(key);
   if (saved) return saved;
   const target = timeFromMinutes(start + Math.floor(Math.random() * (end - start + 1)));
-  localStorage.setItem(key, target);
+  setUserStorage(key, target);
   return target;
 }
 
@@ -296,6 +426,26 @@ async function saveScheduleSettings(patch) {
   return payload;
 }
 
+async function saveWhatsappSettings(patch) {
+  const payload = await api('/api/settings', {
+    method: 'POST',
+    body: JSON.stringify({
+      whatsappBotEnabled: Boolean(state.settings.whatsappBotEnabled),
+      whatsappReminderEnabled: state.settings.whatsappReminderEnabled !== false,
+      whatsappGroupJid: els.whatsappGroupJid.value.trim(),
+      whatsappReminderLeadMinutes: Number(els.whatsappReminderLeadMinutes.value || 5),
+      whatsappClockInTargetStartTime: normalizeTime(els.whatsappClockInTargetStartTime.value, '08:55'),
+      whatsappClockInTargetEndTime: normalizeTime(els.whatsappClockInTargetEndTime.value, '09:10'),
+      whatsappClockOutTargetStartTime: normalizeTime(els.whatsappClockOutTargetStartTime.value, '17:55'),
+      whatsappClockOutTargetEndTime: normalizeTime(els.whatsappClockOutTargetEndTime.value, '18:10'),
+      ...patch,
+    }),
+  });
+  state.settings = payload;
+  renderWhatsappSettings();
+  return payload;
+}
+
 async function savePhotoSettings(patch) {
   const saveId = ++state.photoSettingsSaveId;
   const next = {
@@ -304,9 +454,8 @@ async function savePhotoSettings(patch) {
     ...patch,
   };
 
-  // Keep photo random state local too, so the toggle stays responsive even if save is slow.
-  localStorage.setItem('hris-random-photo-enabled', next.randomPhotoEnabled ? '1' : '0');
-  localStorage.setItem('hris-selected-photo-id', next.selectedPhotoId || '');
+  setUserStorage('random-photo-enabled', next.randomPhotoEnabled ? '1' : '0');
+  setUserStorage('selected-photo-id', next.selectedPhotoId || '');
   state.randomPhotoEnabled = Boolean(next.randomPhotoEnabled);
   state.selectedPhotoId = String(next.selectedPhotoId || '');
   state.settings = { ...state.settings, ...next };
@@ -338,10 +487,8 @@ async function savePhotoSettings(patch) {
 
 function triggerScheduledAction(action, targetTime) {
   const label = action === 'clock-in' ? 'check-in' : 'check-out';
-  state.scheduledAction = { action, targetTime };
-  log(`Jadwal ${label} ${targetTime} aktif. Submit HRIS otomatis berjalan.`);
-  if (action === 'clock-in') els.clockIn.click();
-  if (action === 'clock-out') els.clockOut.click();
+  markPrompted(action, targetTime);
+  log(`Reminder ${label} ${targetTime}. Klik Submit ${action === 'clock-in' ? 'Clock In' : 'Clock Out'} atau kirim command WhatsApp jika ingin submit HRIS.`);
 }
 
 function isScheduleDue(currentTime, targetTime) {
@@ -351,7 +498,7 @@ function isScheduleDue(currentTime, targetTime) {
 }
 
 function checkScheduleTick() {
-  if (!state.settings.scheduleEnabled || state.scheduledAction) return;
+  if (!state.appAuthenticated || !state.settings.scheduleEnabled) return;
   const now = new Date();
   const current = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   const checkInTarget = getScheduleTime('clock-in');
@@ -388,6 +535,7 @@ function renderLocations() {
 
 async function loadSettings() {
   state.settings = await api('/api/settings');
+  if (state.coords.source === 'default') state.coords = randomDefaultCoords(state.settings);
   renderSettings();
 }
 
@@ -478,7 +626,7 @@ async function selectPhoto(photoId, options = {}) {
 
 function getRandomPhoto() {
   if (!state.photos.length) return null;
-  const lastRandomPhotoId = localStorage.getItem('hris-last-random-photo-id') || '';
+  const lastRandomPhotoId = getUserStorage('last-random-photo-id') || '';
   const unusedPhotos = state.photos.filter((photo) => !photo.usedAt);
   let pool = unusedPhotos;
 
@@ -501,7 +649,7 @@ function getRandomPhoto() {
 }
 
 function rememberRandomPhotoUsed(photoId) {
-  if (photoId) localStorage.setItem('hris-last-random-photo-id', String(photoId));
+  if (photoId) setUserStorage('last-random-photo-id', String(photoId));
 }
 
 function setCameraToggle(active) {
@@ -642,6 +790,78 @@ async function restoreSession() {
   }
 }
 
+async function initializeAuthenticatedApp() {
+  loadUserUiPreferences();
+  renderAppAuth();
+  await loadSettings().catch((error) => log(error.message));
+  await loadPhotos().catch((error) => log(`Load foto gagal: ${error.message}`));
+  renderLocations();
+  await restoreSession().catch((error) => {
+    els.sessionStatus.textContent = 'Belum login';
+    setLoginVisible(true);
+    log(`Cek session tersimpan gagal: ${error.message}`);
+  });
+  checkScheduleTick();
+}
+
+els.appAuthForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const username = els.appUsername.value.trim();
+  const password = els.appPassword.value;
+  if (!username || !password) return;
+
+  try {
+    const payload = await api(state.setupRequired ? '/api/app/setup' : '/api/app/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        username,
+        password,
+        displayName: els.appDisplayName.value.trim(),
+      }),
+    });
+    state.appCsrfToken = payload.appCsrfToken || '';
+    state.appUser = payload.appUser || null;
+    state.setupRequired = Boolean(payload.setupRequired);
+    state.appAuthenticated = Boolean(payload.authenticated);
+    els.appPassword.value = '';
+    log(state.setupRequired ? 'Setup aplikasi belum selesai.' : 'Login aplikasi sukses.');
+    await initializeAuthenticatedApp();
+  } catch (error) {
+    log(error.message);
+  }
+});
+
+els.saveAppProfile.addEventListener('click', async () => {
+  try {
+    const payload = await api('/api/app/profile', {
+      method: 'POST',
+      body: JSON.stringify({ whatsappPhoneNumber: els.appWhatsappPhoneNumber.value.trim() }),
+    });
+    state.appUser = payload.appUser || state.appUser;
+    renderAppAuth();
+    log('Profil aplikasi tersimpan.', payload.appUser);
+  } catch (error) {
+    log(error.message);
+  }
+});
+
+els.appLogout.addEventListener('click', async () => {
+  try {
+    await api('/api/app/logout', { method: 'POST' });
+  } catch (error) {
+    log(error.message);
+  }
+  state.appCsrfToken = '';
+  state.appUser = null;
+  state.appAuthenticated = false;
+  state.csrfToken = '';
+  state.photos = [];
+  state.settings = { ...state.settings, selectedPhotoId: '' };
+  resetHrisState();
+  await loadBootstrap().catch((error) => log(`Reload bootstrap gagal: ${error.message}`));
+  log('Logout aplikasi sukses.');
+});
+
 els.loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const email = els.email.value.trim();
@@ -699,6 +919,7 @@ els.saveSettings.addEventListener('click', async () => {
       }),
     });
     state.settings = payload;
+    if (state.coords.source === 'default') state.coords = randomDefaultCoords(state.settings);
     renderSettings();
     log('Default location tersimpan', payload);
   } catch (error) {
@@ -710,7 +931,7 @@ els.scheduleEnabled.addEventListener('click', async () => {
   try {
     const enabled = !state.settings.scheduleEnabled;
     const payload = await saveScheduleSettings({ scheduleEnabled: enabled });
-    log(enabled ? 'Jadwal otomatis aktif.' : 'Jadwal otomatis nonaktif.', payload);
+    log(enabled ? 'Reminder lokal aktif.' : 'Reminder lokal nonaktif.', payload);
   } catch (error) {
     log(error.message);
   }
@@ -718,7 +939,7 @@ els.scheduleEnabled.addEventListener('click', async () => {
 
 els.scheduleCollapse.addEventListener('click', () => {
   state.scheduleDetailsExpanded = !state.scheduleDetailsExpanded;
-  localStorage.setItem('hris-schedule-details-expanded', state.scheduleDetailsExpanded ? '1' : '0');
+  setUserStorage('schedule-details-expanded', state.scheduleDetailsExpanded ? '1' : '0');
   renderSchedule();
 });
 
@@ -752,7 +973,42 @@ els.saveSchedule.addEventListener('click', async () => {
       checkOutStartTime: normalizeTime(els.checkOutStartTime.value, '17:45'),
       checkOutEndTime: normalizeTime(els.checkOutEndTime.value, '18:15'),
     });
-    log('Jadwal otomatis tersimpan.', payload);
+    log('Jadwal reminder lokal tersimpan.', payload);
+  } catch (error) {
+    log(error.message);
+  }
+});
+
+els.whatsappBotEnabled.addEventListener('click', async () => {
+  try {
+    const enabled = !state.settings.whatsappBotEnabled;
+    const payload = await saveWhatsappSettings({ whatsappBotEnabled: enabled });
+    log(enabled ? 'WhatsApp bot aktif. Scan QR di terminal jika diminta.' : 'WhatsApp bot nonaktif.', payload);
+  } catch (error) {
+    log(error.message);
+  }
+});
+
+els.whatsappReminderEnabled.addEventListener('click', async () => {
+  try {
+    const enabled = state.settings.whatsappReminderEnabled === false;
+    const payload = await saveWhatsappSettings({ whatsappReminderEnabled: enabled });
+    log(enabled ? 'WhatsApp reminder aktif.' : 'WhatsApp reminder nonaktif.', payload);
+  } catch (error) {
+    log(error.message);
+  }
+});
+
+els.saveWhatsappSettings.addEventListener('click', async () => {
+  try {
+    const payload = await saveWhatsappSettings({
+      whatsappReminderLeadMinutes: Number(els.whatsappReminderLeadMinutes.value || 5),
+      whatsappClockInTargetStartTime: normalizeTime(els.whatsappClockInTargetStartTime.value, '08:55'),
+      whatsappClockInTargetEndTime: normalizeTime(els.whatsappClockInTargetEndTime.value, '09:10'),
+      whatsappClockOutTargetStartTime: normalizeTime(els.whatsappClockOutTargetStartTime.value, '17:55'),
+      whatsappClockOutTargetEndTime: normalizeTime(els.whatsappClockOutTargetEndTime.value, '18:10'),
+    });
+    log('WhatsApp bot settings tersimpan.', payload);
   } catch (error) {
     log(error.message);
   }
@@ -874,9 +1130,8 @@ els.getLocation.addEventListener('click', () => {
       log('GPS berhasil diambil', state.coords);
     },
     (error) => {
-      state.coords = { ...DEFAULT_COORDS };
-      renderGeoStatus();
-      log(`Gagal mengambil GPS: ${error.message}. Pakai lokasi default.`, state.coords);
+      refreshDefaultCoords();
+      log(`Gagal mengambil GPS: ${error.message}. Pakai lokasi default ±${DEFAULT_COORD_RADIUS_METERS}m.`, state.coords);
     },
     { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
   );
@@ -888,9 +1143,7 @@ els.clockIn.addEventListener('click', async () => {
     finishScheduledAction('clock-in', false);
     return;
   }
-  if (!state.coords) {
-    state.coords = { ...DEFAULT_COORDS };
-  }
+  const coords = coordsForSubmission();
 
   let photoId = state.selectedPhotoId;
   let imageBase64 = state.imageBase64;
@@ -926,8 +1179,8 @@ els.clockIn.addEventListener('click', async () => {
         location: els.locationSelect.value,
         working_from: els.workingFrom.value.trim(),
         work_from_type: 'office',
-        currentLatitude: state.coords.latitude,
-        currentLongitude: state.coords.longitude,
+        currentLatitude: coords.latitude,
+        currentLongitude: coords.longitude,
         photoId,
         imageBase64: photoId ? '' : imageBase64,
         fix_clock_out_time: els.fixClockOutTime.value.trim(),
@@ -950,9 +1203,7 @@ els.clockIn.addEventListener('click', async () => {
 });
 
 els.clockOut.addEventListener('click', async () => {
-  if (!state.coords) {
-    state.coords = { ...DEFAULT_COORDS };
-  }
+  const coords = coordsForSubmission();
 
   let options = state.clockOutOptions;
   if (!options?.canClockOut) {
@@ -977,8 +1228,8 @@ els.clockOut.addEventListener('click', async () => {
       body: JSON.stringify({
         csrfToken: options.csrfToken,
         attendanceId: options.attendanceId,
-        currentLatitude: state.coords.latitude,
-        currentLongitude: state.coords.longitude,
+        currentLatitude: coords.latitude,
+        currentLongitude: coords.longitude,
       }),
     });
     log('Clock-out sukses', payload);
@@ -993,12 +1244,12 @@ els.clockOut.addEventListener('click', async () => {
 });
 
 await loadBootstrap().catch((error) => log(`Init aplikasi gagal: ${error.message}`));
-await loadSettings().catch((error) => log(error.message));
-await loadPhotos().catch((error) => log(`Load foto gagal: ${error.message}`));
-renderLocations();
-await restoreSession().catch((error) => {
-  els.sessionStatus.textContent = 'Belum login';
-  log(`Cek session tersimpan gagal: ${error.message}`);
-});
-checkScheduleTick();
+if (state.appAuthenticated) {
+  await initializeAuthenticatedApp();
+} else {
+  resetHrisState();
+  setLoginVisible(false);
+  renderAppAuth();
+  log(state.setupRequired ? 'Buat admin aplikasi terlebih dahulu.' : 'Login aplikasi terlebih dahulu.');
+}
 setInterval(checkScheduleTick, 30000);

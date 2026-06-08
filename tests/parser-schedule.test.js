@@ -19,7 +19,12 @@ async function loadScheduleHelpers() {
   assert.notEqual(start, -1, 'normalizeTime function not found');
   assert.notEqual(end, -1, 'saveScheduleSettings function not found');
 
-  return new Function(`${source.slice(start, end)}\nreturn { normalizeTime, minutesFromTime, timeFromMinutes, dailyRandomTarget };`)();
+  return new Function(`
+    function getUserStorage(key) { return localStorage.getItem(key); }
+    function setUserStorage(key, value) { localStorage.setItem(key, value); }
+    ${source.slice(start, end)}
+    return { normalizeTime, minutesFromTime, timeFromMinutes, dailyRandomTarget };
+  `)();
 }
 
 async function loadScheduleDueHelper() {
@@ -43,6 +48,28 @@ async function loadScheduleDueHelper() {
     ${match[0]}
     return { isScheduleDue };
   `)();
+}
+
+async function loadCoordinateHelpers() {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const start = source.indexOf('const DEFAULT_COORDS');
+  const end = source.indexOf('const state =');
+  assert.notEqual(start, -1, 'DEFAULT_COORDS not found');
+  assert.notEqual(end, -1, 'state declaration not found');
+
+  return new Function(`${source.slice(start, end)}\nreturn { randomCoordinateInRange, DEFAULT_COORD_RADIUS_METERS };`)();
+}
+
+function distanceMeters(a, b) {
+  const earthRadius = 6371000;
+  const toRadians = (value) => (value * Math.PI) / 180;
+  const deltaLatitude = toRadians(b.latitude - a.latitude);
+  const deltaLongitude = toRadians(b.longitude - a.longitude);
+  const latitude1 = toRadians(a.latitude);
+  const latitude2 = toRadians(b.latitude);
+  const haversine = Math.sin(deltaLatitude / 2) ** 2
+    + Math.cos(latitude1) * Math.cos(latitude2) * Math.sin(deltaLongitude / 2) ** 2;
+  return 2 * earthRadius * Math.asin(Math.sqrt(haversine));
 }
 
 test('parseFormFields reads HRIS modal fields flexibly', async () => {
@@ -86,6 +113,18 @@ test('parseFormFields supports fix clock-out fields from HRIS', async () => {
     last_attendance_id: '215',
     last_attendance_date: '2026-05-20',
   });
+});
+
+test('default coordinate helper stays within 5 meters of office coordinate', async () => {
+  const { randomCoordinateInRange, DEFAULT_COORD_RADIUS_METERS } = await loadCoordinateHelpers();
+  const base = { latitude: -1.228552, longitude: 116.881761 };
+  const values = [1, 0];
+  const coords = randomCoordinateInRange(base.latitude, base.longitude, DEFAULT_COORD_RADIUS_METERS, () => values.shift() ?? 0);
+
+  assert.notDeepEqual({ latitude: coords.latitude, longitude: coords.longitude }, base);
+  assert.ok(distanceMeters(base, coords) <= DEFAULT_COORD_RADIUS_METERS + 0.05);
+  assert.equal(coords.source, 'default');
+  assert.equal(coords.accuracy, DEFAULT_COORD_RADIUS_METERS);
 });
 
 test('schedule helpers normalize and compare time safely', async () => {
