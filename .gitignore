@@ -28,3 +28,5 @@ pnpm-debug.log*
 coverage/
 dist/
 .cache/
+.omc/
+.claude/

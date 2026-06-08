@@ -122,7 +122,38 @@ h2 { font-size: 22px; }
 }
 
 .hero-login label:first-child { margin-top: 0; }
+.hero-login h2 { margin-bottom: 12px; }
 .hero-login .primary { margin-top: 14px; }
+
+.app-profile {
+  display: grid;
+  gap: 10px;
+  width: min(360px, 100%);
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.app-profile-main {
+  display: grid;
+  gap: 8px;
+}
+
+.app-profile-main label {
+  margin: 0;
+}
+
+.app-profile-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.app-profile span {
+  color: var(--forest);
+  font-weight: 700;
+}
 
 .status-pill {
   white-space: nowrap;
@@ -250,7 +281,7 @@ label {
   font-weight: 700;
 }
 
-input, select {
+input, select, textarea {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 16px;
@@ -261,7 +292,9 @@ input, select {
   outline: none;
 }
 
-input:focus, select:focus {
+textarea { resize: vertical; }
+
+input:focus, select:focus, textarea:focus {
   border-color: var(--forest);
   box-shadow: 0 0 0 4px rgba(199, 255, 99, 0.36);
 }
@@ -418,7 +451,8 @@ button:disabled { cursor: not-allowed; opacity: 0.55; transform: none; }
   margin-top: 8px;
 }
 
-.schedule-panel .secondary {
+.schedule-panel .secondary,
+.whatsapp-panel .secondary {
   width: 100%;
   margin-top: 16px;
 }
