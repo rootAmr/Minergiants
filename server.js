@@ -215,6 +215,30 @@ function publicAppUser(row) {
   };
 }
 
+function requireAdmin(ctx) {
+  if (ctx.user.role !== "admin") throw httpError(403, "Hanya admin yang bisa mengelola user.");
+}
+
+function normalizedProfilePhone(value) {
+  const rawPhoneNumber = String(value || "");
+  const whatsappPhoneNumber = normalizeWhatsappPhone(rawPhoneNumber);
+  if (
+    rawPhoneNumber.trim() &&
+    (whatsappPhoneNumber.length < 8 || whatsappPhoneNumber.length > 16)
+  ) {
+    throw httpError(400, "Nomor WhatsApp harus 8-16 digit.");
+  }
+  return whatsappPhoneNumber;
+}
+
+function ensureUniqueWhatsappPhone(database, whatsappPhoneNumber, exceptUserId = 0) {
+  if (!whatsappPhoneNumber) return;
+  const duplicate = database
+    .prepare("SELECT id FROM app_users WHERE whatsapp_phone_number = ? AND id <> ?")
+    .get(whatsappPhoneNumber, exceptUserId);
+  if (duplicate) throw httpError(409, "Nomor WhatsApp sudah dipakai user lain.");
+}
+
 async function appUserCount() {
   const database = await getDb();
   return database.prepare("SELECT COUNT(*) AS count FROM app_users").get()
@@ -328,6 +352,52 @@ async function createFirstAdmin(input) {
     .get(result.lastInsertRowid);
 }
 
+async function listManagedAppUsers(ctx) {
+  requireAdmin(ctx);
+  const database = await getDb();
+  return database
+    .prepare(
+      "SELECT id, username, display_name, whatsapp_phone_number, role FROM app_users ORDER BY id",
+    )
+    .all()
+    .map(publicAppUser);
+}
+
+async function createManagedAppUser(ctx, input) {
+  requireAdmin(ctx);
+  const username = String(input.username || "").trim();
+  const password = String(input.password || "");
+  const displayName = String(input.displayName || username).trim() || username;
+  const whatsappPhoneNumber = normalizedProfilePhone(input.whatsappPhoneNumber);
+  if (username.length < 3) throw httpError(400, "Username minimal 3 karakter.");
+  if (password.length < 8)
+    throw httpError(400, "Password aplikasi minimal 8 karakter.");
+
+  const database = await getDb();
+  const existing = database
+    .prepare("SELECT id FROM app_users WHERE lower(username) = lower(?)")
+    .get(username);
+  if (existing) throw httpError(409, "Username aplikasi sudah dipakai.");
+  ensureUniqueWhatsappPhone(database, whatsappPhoneNumber);
+
+  const now = new Date().toISOString();
+  const result = database
+    .prepare(
+      `
+    INSERT INTO app_users (username, password_hash, display_name, whatsapp_phone_number, role, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 'user', ?, ?)
+  `,
+    )
+    .run(username, hashPassword(password), displayName, whatsappPhoneNumber, now, now);
+  return publicAppUser(
+    database
+      .prepare(
+        "SELECT id, username, display_name, whatsapp_phone_number, role FROM app_users WHERE id = ?",
+      )
+      .get(result.lastInsertRowid),
+  );
+}
+
 async function updateAppProfile(ctx, input) {
   const hasDisplayName = Object.hasOwn(input, "displayName");
   const hasPhoneNumber = Object.hasOwn(input, "whatsappPhoneNumber");
@@ -335,27 +405,12 @@ async function updateAppProfile(ctx, input) {
     ? String(input.displayName || ctx.user.username).trim() || ctx.user.username
     : ctx.user.displayName || ctx.user.username;
   const rawPhoneNumber = hasPhoneNumber
-    ? String(input.whatsappPhoneNumber || "")
+    ? input.whatsappPhoneNumber
     : ctx.user.whatsappPhoneNumber || "";
-  const whatsappPhoneNumber = normalizeWhatsappPhone(rawPhoneNumber);
-
-  if (
-    rawPhoneNumber.trim() &&
-    (whatsappPhoneNumber.length < 8 || whatsappPhoneNumber.length > 16)
-  ) {
-    throw httpError(400, "Nomor WhatsApp harus 8-16 digit.");
-  }
+  const whatsappPhoneNumber = normalizedProfilePhone(rawPhoneNumber);
 
   const database = await getDb();
-  if (whatsappPhoneNumber) {
-    const duplicate = database
-      .prepare(
-        "SELECT id FROM app_users WHERE whatsapp_phone_number = ? AND id <> ?",
-      )
-      .get(whatsappPhoneNumber, ctx.user.id);
-    if (duplicate)
-      throw httpError(409, "Nomor WhatsApp sudah dipakai user lain.");
-  }
+  ensureUniqueWhatsappPhone(database, whatsappPhoneNumber, ctx.user.id);
 
   database
     .prepare(
@@ -1915,6 +1970,15 @@ async function route(req, res) {
           authenticated: false,
           message: "Logout aplikasi sukses",
         });
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/app/users") {
+        return json(res, 200, { users: await listManagedAppUsers(ctx) });
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/app/users") {
+        const appUser = await createManagedAppUser(ctx, await readJson(req));
+        return json(res, 200, { appUser, users: await listManagedAppUsers(ctx) });
       }
 
       if (req.method === "GET" && url.pathname === "/api/app/profile") {

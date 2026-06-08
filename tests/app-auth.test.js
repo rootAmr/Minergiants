@@ -123,29 +123,76 @@ test('app auth enforces CSRF and isolates settings, photos, and HRIS sessions', 
   });
   assert.equal(adminSettings.payload.workingFrom, 'admin-office');
 
-  const database = new DatabaseSync(path.join(dataDir, 'app.db'));
-  const now = new Date().toISOString();
-  const expires = new Date(Date.now() + 3600000).toISOString();
-  const secondUser = database.prepare(`
-    INSERT INTO app_users (username, password_hash, display_name, role, created_at, updated_at)
-    VALUES ('second', 'scrypt:fake:fake', 'Second', 'user', ?, ?)
-  `).run(now, now);
-  database.prepare(`
-    INSERT INTO app_sessions (id, user_id, csrf_token, created_at, expires_at, last_seen_at)
-    VALUES ('second-session', ?, 'second-csrf', ?, ?, ?)
-  `).run(secondUser.lastInsertRowid, now, expires, now);
+  const usersBefore = await request(baseUrl, '/api/app/users', {
+    cookie: setup.cookie,
+  });
+  assert.deepEqual(usersBefore.payload.users.map((item) => item.username), ['admin']);
 
-  const secondCookie = 'hris_app_session=second-session';
+  const noUserCsrf = await request(baseUrl, '/api/app/users', {
+    method: 'POST',
+    cookie: setup.cookie,
+    body: {
+      username: 'blocked',
+      password: 'password123',
+      whatsappPhoneNumber: '628199999999',
+    },
+  });
+  assert.equal(noUserCsrf.response.status, 403);
+
+  const createdSecondUser = await request(baseUrl, '/api/app/users', {
+    method: 'POST',
+    cookie: setup.cookie,
+    csrf: setup.payload.appCsrfToken,
+    body: {
+      username: 'second',
+      password: 'password123',
+      displayName: 'Second',
+      whatsappPhoneNumber: '+62 811-0000-000',
+    },
+  });
+  assert.equal(createdSecondUser.response.status, 200);
+  assert.equal(createdSecondUser.payload.appUser.whatsappPhoneNumber, '628110000000');
+  assert.deepEqual(createdSecondUser.payload.users.map((item) => item.username), ['admin', 'second']);
+
+  const duplicateManagedPhone = await request(baseUrl, '/api/app/users', {
+    method: 'POST',
+    cookie: setup.cookie,
+    csrf: setup.payload.appCsrfToken,
+    body: {
+      username: 'third',
+      password: 'password123',
+      whatsappPhoneNumber: '628123456789',
+    },
+  });
+  assert.equal(duplicateManagedPhone.response.status, 409);
+
+  const secondLogin = await request(baseUrl, '/api/app/login', {
+    method: 'POST',
+    body: { username: 'second', password: 'password123' },
+  });
+  assert.equal(secondLogin.response.status, 200);
+  const secondCookie = secondLogin.cookie;
+  const secondCsrf = secondLogin.payload.appCsrfToken;
+  const secondUserId = secondLogin.payload.appUser.id;
+
+  const nonAdminUsers = await request(baseUrl, '/api/app/users', {
+    cookie: secondCookie,
+  });
+  assert.equal(nonAdminUsers.response.status, 403);
+
   const duplicatePhone = await request(baseUrl, '/api/app/profile', {
     method: 'POST',
     cookie: secondCookie,
-    csrf: 'second-csrf',
+    csrf: secondCsrf,
     body: { whatsappPhoneNumber: '628123456789' },
   });
   assert.equal(duplicatePhone.response.status, 409);
 
   const secondSettings = await request(baseUrl, '/api/settings', { cookie: secondCookie });
   assert.equal(secondSettings.payload.workingFrom, '');
+
+  const database = new DatabaseSync(path.join(dataDir, 'app.db'));
+  const now = new Date().toISOString();
 
   const photo = await request(baseUrl, '/api/photos', {
     method: 'POST',
@@ -161,7 +208,7 @@ test('app auth enforces CSRF and isolates settings, photos, and HRIS sessions', 
   const deleteOtherPhoto = await request(baseUrl, `/api/photos/${photo.payload.id}`, {
     method: 'DELETE',
     cookie: secondCookie,
-    csrf: 'second-csrf',
+    csrf: secondCsrf,
   });
   assert.equal(deleteOtherPhoto.payload.deleted, false);
 
@@ -172,7 +219,7 @@ test('app auth enforces CSRF and isolates settings, photos, and HRIS sessions', 
   database.prepare(`
     INSERT OR REPLACE INTO hris_sessions (user_id, cookies_json, last_csrf_token, saved_at)
     VALUES (?, '{"second":"1"}', 'second-token', ?)
-  `).run(secondUser.lastInsertRowid, now);
+  `).run(secondUserId, now);
 
   const hrisLogout = await request(baseUrl, '/api/logout', {
     method: 'POST',
@@ -182,7 +229,7 @@ test('app auth enforces CSRF and isolates settings, photos, and HRIS sessions', 
   assert.equal(hrisLogout.response.status, 200);
 
   const adminHris = database.prepare('SELECT cookies_json, last_csrf_token FROM hris_sessions WHERE user_id = ?').get(setup.payload.appUser.id);
-  const secondHris = database.prepare('SELECT cookies_json, last_csrf_token FROM hris_sessions WHERE user_id = ?').get(secondUser.lastInsertRowid);
+  const secondHris = database.prepare('SELECT cookies_json, last_csrf_token FROM hris_sessions WHERE user_id = ?').get(secondUserId);
   assert.equal(adminHris.cookies_json, '{}');
   assert.equal(adminHris.last_csrf_token, '');
   assert.equal(secondHris.cookies_json, '{"second":"1"}');
