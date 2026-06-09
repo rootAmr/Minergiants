@@ -1,4 +1,11 @@
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+  scryptSync,
+  timingSafeEqual,
+} from "node:crypto";
 import { createServer } from "node:http";
 import { readFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -108,6 +115,15 @@ async function getDb() {
       saved_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS hris_credentials (
+      user_id INTEGER PRIMARY KEY REFERENCES app_users(id) ON DELETE CASCADE,
+      email TEXT NOT NULL DEFAULT '',
+      password_encrypted TEXT NOT NULL DEFAULT '',
+      password_nonce TEXT NOT NULL DEFAULT '',
+      password_tag TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS user_settings (
       user_id INTEGER PRIMARY KEY REFERENCES app_users(id) ON DELETE CASCADE,
       value TEXT NOT NULL,
@@ -188,6 +204,16 @@ function httpError(statusCode, message) {
   return error;
 }
 
+function hrisSessionExpiredError() {
+  const error = new Error("Session HRIS habis, login ulang otomatis gagal dijalankan.");
+  error.hrisSessionExpired = true;
+  return error;
+}
+
+function isHrisSessionExpiredError(error) {
+  return Boolean(error?.hrisSessionExpired);
+}
+
 function hashPassword(password) {
   const salt = randomBytes(16).toString("hex");
   const hash = scryptSync(String(password), salt, 64).toString("hex");
@@ -202,6 +228,59 @@ function verifyPassword(password, passwordHash) {
   return (
     stored.length === candidate.length && timingSafeEqual(stored, candidate)
   );
+}
+
+function credentialEncryptionKey() {
+  const secret = String(process.env.APP_CREDENTIAL_SECRET || "").trim();
+  if (!secret) {
+    throw httpError(
+      400,
+      "APP_CREDENTIAL_SECRET belum diset. Set env ini sebelum menyimpan kredensial HRIS.",
+    );
+  }
+  return createHash("sha256").update(secret).digest();
+}
+
+function encryptHrisPassword(password) {
+  const nonce = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", credentialEncryptionKey(), nonce);
+  const encrypted = Buffer.concat([
+    cipher.update(String(password), "utf8"),
+    cipher.final(),
+  ]);
+  const tag = cipher.getAuthTag();
+  return {
+    passwordEncrypted: encrypted.toString("hex"),
+    passwordNonce: nonce.toString("hex"),
+    passwordTag: tag.toString("hex"),
+  };
+}
+
+function decryptHrisPassword(row) {
+  try {
+    const decipher = createDecipheriv(
+      "aes-256-gcm",
+      credentialEncryptionKey(),
+      Buffer.from(row.password_nonce || "", "hex"),
+    );
+    decipher.setAuthTag(Buffer.from(row.password_tag || "", "hex"));
+    return Buffer.concat([
+      decipher.update(Buffer.from(row.password_encrypted || "", "hex")),
+      decipher.final(),
+    ]).toString("utf8");
+  } catch {
+    throw httpError(
+      400,
+      "Password HRIS tersimpan tidak bisa dibaca. Simpan ulang kredensial HRIS.",
+    );
+  }
+}
+
+function hrisCredentialStatus(row) {
+  return {
+    hrisEmail: row?.email || "",
+    hrisCredentialConfigured: Boolean(row?.email && row?.password_encrypted),
+  };
 }
 
 function publicAppUser(row) {
@@ -398,7 +477,7 @@ async function createManagedAppUser(ctx, input) {
   );
 }
 
-async function updateAppProfile(ctx, input) {
+function updateAppProfileInDb(database, ctx, input) {
   const hasDisplayName = Object.hasOwn(input, "displayName");
   const hasPhoneNumber = Object.hasOwn(input, "whatsappPhoneNumber");
   const displayName = hasDisplayName
@@ -409,7 +488,6 @@ async function updateAppProfile(ctx, input) {
     : ctx.user.whatsappPhoneNumber || "";
   const whatsappPhoneNumber = normalizedProfilePhone(rawPhoneNumber);
 
-  const database = await getDb();
   ensureUniqueWhatsappPhone(database, whatsappPhoneNumber, ctx.user.id);
 
   database
@@ -431,6 +509,134 @@ async function updateAppProfile(ctx, input) {
       "SELECT id, username, display_name, whatsapp_phone_number, role FROM app_users WHERE id = ?",
     )
     .get(ctx.user.id);
+}
+
+
+function getHrisCredentialRowFromDb(database, userId) {
+  return database
+    .prepare(
+      `
+    SELECT email, password_encrypted, password_nonce, password_tag
+    FROM hris_credentials
+    WHERE user_id = ?
+  `,
+    )
+    .get(userId);
+}
+
+async function getHrisCredentialRow(ctx) {
+  return getHrisCredentialRowFromDb(await getDb(), ctx.user.id);
+}
+
+async function getHrisCredentialStatus(ctx) {
+  return hrisCredentialStatus(await getHrisCredentialRow(ctx));
+}
+
+function saveHrisCredentialsInDb(database, ctx, input) {
+  const email = String(input.hrisEmail || input.email || "").trim();
+  const password = String(input.hrisPassword || input.password || "");
+  if (!email) throw httpError(400, "Email HRIS wajib diisi.");
+
+  const existing = getHrisCredentialRowFromDb(database, ctx.user.id);
+  if (!password && !existing?.password_encrypted) {
+    throw httpError(400, "Password HRIS wajib diisi saat menyimpan kredensial baru.");
+  }
+
+  if (!password && existing.email === email) {
+    return { status: hrisCredentialStatus(existing), changed: false };
+  }
+
+  const encrypted = password
+    ? encryptHrisPassword(password)
+    : {
+        passwordEncrypted: existing.password_encrypted,
+        passwordNonce: existing.password_nonce,
+        passwordTag: existing.password_tag,
+      };
+  database
+    .prepare(
+      `
+    INSERT INTO hris_credentials (
+      user_id, email, password_encrypted, password_nonce, password_tag, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET
+      email = excluded.email,
+      password_encrypted = excluded.password_encrypted,
+      password_nonce = excluded.password_nonce,
+      password_tag = excluded.password_tag,
+      updated_at = excluded.updated_at
+  `,
+    )
+    .run(
+      ctx.user.id,
+      email,
+      encrypted.passwordEncrypted,
+      encrypted.passwordNonce,
+      encrypted.passwordTag,
+      new Date().toISOString(),
+    );
+  return {
+    status: hrisCredentialStatus(getHrisCredentialRowFromDb(database, ctx.user.id)),
+    changed: true,
+  };
+}
+
+
+function clearHrisCredentialsInDb(database, ctx) {
+  database.prepare("DELETE FROM hris_credentials WHERE user_id = ?").run(ctx.user.id);
+  return { status: hrisCredentialStatus(null), changed: true };
+}
+
+
+async function updateAppProfileWithCredentials(ctx, input) {
+  const database = await getDb();
+  let appUser;
+  let hrisCredential;
+  let clearHrisSession = false;
+
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    appUser = publicAppUser(updateAppProfileInDb(database, ctx, input));
+    hrisCredential = hrisCredentialStatus(
+      getHrisCredentialRowFromDb(database, ctx.user.id),
+    );
+
+    if (input.clearHrisCredentials) {
+      const result = clearHrisCredentialsInDb(database, ctx);
+      hrisCredential = result.status;
+      clearHrisSession = result.changed;
+    } else if (
+      Object.hasOwn(input, "hrisEmail") ||
+      Object.hasOwn(input, "hrisPassword")
+    ) {
+      const result = saveHrisCredentialsInDb(database, ctx, input);
+      hrisCredential = result.status;
+      clearHrisSession = result.changed;
+    }
+
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+
+  if (clearHrisSession) await clearSession(ctx);
+  return { appUser, hrisCredential };
+}
+
+async function getStoredHrisCredentials(ctx) {
+  const row = await getHrisCredentialRow(ctx);
+  if (!row?.email || !row?.password_encrypted) {
+    throw httpError(
+      400,
+      "Kredensial HRIS belum disimpan. Isi email dan password HRIS di Profil Aplikasi.",
+    );
+  }
+  return {
+    email: row.email,
+    password: decryptHrisPassword(row),
+  };
 }
 
 async function createAppSession(userId) {
@@ -957,20 +1163,28 @@ function mockClockOutModalHtml(session) {
 async function mockHrisFetch(ctx, session, url, options = {}) {
   const method = String(options.method || "GET").toUpperCase();
   const pathname = String(url).split("?")[0];
-  const attendance = devAttendanceState(session);
-  session.jar.set("hris_dev_session", `user-${ctx.user.id}`);
-  session.lastCsrfToken = DEV_CSRF_TOKEN;
-  await saveSession(ctx);
 
   if (pathname === "/login" && method === "GET")
     return mockHrisResponse(mockLoginHtml());
   if (pathname === "/login" && method === "POST") {
+    session.jar.set("hris_dev_session", `user-${ctx.user.id}`);
+    session.lastCsrfToken = DEV_CSRF_TOKEN;
+    await saveSession(ctx);
     return mockHrisJson({
       status: "success",
       message: "Dev login dummy sukses",
       devMode: true,
     });
   }
+
+  if (session.jar.get("hris_dev_session") !== `user-${ctx.user.id}`) {
+    return mockHrisResponse(mockLoginHtml());
+  }
+
+  const attendance = devAttendanceState(session);
+  session.lastCsrfToken = DEV_CSRF_TOKEN;
+  await saveSession(ctx);
+
   if (pathname === "/account/dashboard")
     return mockHrisResponse(mockDashboardHtml(session));
   if (pathname === "/account/attendances/clock-in-modal")
@@ -1021,6 +1235,17 @@ function isLoginPageHtml(html) {
     /id=["']login-form["']/i.test(html) ||
     /<form\b[^>]*action=["'][^"']*\/login[^"']*["'][^>]*>/i.test(html)
   );
+}
+
+async function assertNotHrisLoginResponse(ctx, response, payloadOrHtml) {
+  const body =
+    typeof payloadOrHtml === "string"
+      ? payloadOrHtml
+      : payloadOrHtml?.raw || "";
+  if (isLoginRedirect(response) || isLoginPageHtml(body)) {
+    await clearSession(ctx);
+    throw hrisSessionExpiredError();
+  }
 }
 
 async function hrisFetch(ctx, url, options = {}) {
@@ -1491,9 +1716,19 @@ function botContextForUser(user) {
     readState: (key) => readUserState(user.id, key),
     writeState: (key, value) => writeUserState(user.id, key, value),
     getSessionStatus: () => getSessionStatus(ctx),
-    getDashboardStatus: () => getDashboardStatus(ctx),
-    storeClockIn: (input) => storeClockIn(ctx, input),
-    storeClockOut: (input) => storeClockOut(ctx, input),
+    getDashboardStatus: () =>
+      withHrisAutoLogin(ctx, () => getDashboardStatus(ctx)),
+    storeClockIn: (input) =>
+      withHrisAutoLogin(ctx, (retrying) =>
+        storeClockIn(ctx, retrying ? { ...input, csrfToken: "" } : input),
+      ),
+    storeClockOut: (input) =>
+      withHrisAutoLogin(ctx, (retrying) =>
+        storeClockOut(
+          ctx,
+          retrying ? { ...input, attendanceId: "", csrfToken: "" } : input,
+        ),
+      ),
     listPhotos: () => listPhotos(ctx),
     getPhoto: (id) => getPhoto(ctx, id),
   };
@@ -1617,6 +1852,31 @@ async function login(ctx, { email, password }) {
   return payload;
 }
 
+async function hasStoredHrisCredentials(ctx) {
+  const row = await getHrisCredentialRow(ctx);
+  return Boolean(row?.email && row?.password_encrypted);
+}
+
+async function loginWithStoredHrisCredentials(ctx) {
+  return login(ctx, await getStoredHrisCredentials(ctx));
+}
+
+async function ensureHrisSession(ctx) {
+  const session = await loadSession(ctx);
+  if (session.jar.size === 0) await loginWithStoredHrisCredentials(ctx);
+}
+
+async function withHrisAutoLogin(ctx, operation) {
+  try {
+    await ensureHrisSession(ctx);
+    return await operation(false);
+  } catch (error) {
+    if (!isHrisSessionExpiredError(error)) throw error;
+    await loginWithStoredHrisCredentials(ctx);
+    return operation(true);
+  }
+}
+
 async function getDashboardHtml(ctx) {
   const response = await hrisFetch(ctx, "/account/dashboard", {
     headers: {
@@ -1626,10 +1886,7 @@ async function getDashboardHtml(ctx) {
     },
   });
   const html = await response.text();
-  if (isLoginRedirect(response) || isLoginPageHtml(html)) {
-    await clearSession(ctx);
-    throw new Error("Session HRIS habis, silakan login ulang");
-  }
+  await assertNotHrisLoginResponse(ctx, response, html);
   if (!response.ok)
     throw new Error(`Dashboard HRIS gagal dimuat (${response.status})`);
   extractCsrfLoose(ctx, html);
@@ -1670,10 +1927,7 @@ async function getClockInModal(ctx) {
     },
   });
   const html = await response.text();
-  if (isLoginRedirect(response) || isLoginPageHtml(html)) {
-    await clearSession(ctx);
-    throw new Error("Session HRIS habis, silakan login ulang");
-  }
+  await assertNotHrisLoginResponse(ctx, response, html);
   if (!response.ok)
     throw new Error(`Modal clock-in HRIS gagal dimuat (${response.status})`);
   return parseModal(ctx, html);
@@ -1681,15 +1935,20 @@ async function getClockInModal(ctx) {
 
 async function getSessionStatus(ctx) {
   const session = await loadSession(ctx);
-  if (session.jar.size === 0) return { loggedIn: false };
+  if (session.jar.size === 0) {
+    if (!(await hasStoredHrisCredentials(ctx))) return { loggedIn: false };
+    await loginWithStoredHrisCredentials(ctx);
+    return { loggedIn: true, autoLoggedIn: true };
+  }
 
   try {
     await getDashboardHtml(ctx);
     return { loggedIn: true };
   } catch (error) {
-    if (error.message.includes("Session HRIS habis"))
-      return { loggedIn: false };
-    throw error;
+    if (!isHrisSessionExpiredError(error)) throw error;
+    if (!(await hasStoredHrisCredentials(ctx))) return { loggedIn: false };
+    await loginWithStoredHrisCredentials(ctx);
+    return { loggedIn: true, autoLoggedIn: true };
   }
 }
 
@@ -1712,6 +1971,9 @@ async function getClockOutOptions(ctx) {
       },
     );
     const modalHtml = await modalResponse.text();
+    await assertNotHrisLoginResponse(ctx, modalResponse, modalHtml);
+    if (!modalResponse.ok)
+      throw new Error(`Modal clock-out HRIS gagal dimuat (${modalResponse.status})`);
     return { ...options, ...parseClockOutModal(modalHtml) };
   }
 
@@ -1747,12 +2009,20 @@ async function storeClockIn(ctx, input) {
   const token = String(
     input.csrfToken || modal?.csrfToken || session.lastCsrfToken || "",
   );
-  const location = String(
+  let location = String(
     input.location ||
       settings.defaultLocationId ||
       modal?.locations?.find((item) => item.selected)?.id ||
       "",
   );
+  if (
+    modal?.locations?.length &&
+    !modal.locations.some((item) => item.id === location)
+  ) {
+    location = String(
+      modal.locations.find((item) => item.selected)?.id || modal.locations[0]?.id || "",
+    );
+  }
   const fallbackCoords = randomCoordinateInRange(
     settings.officeLatitude || DEFAULT_LATITUDE,
     settings.officeLongitude || DEFAULT_LONGITUDE,
@@ -1817,6 +2087,7 @@ async function storeClockIn(ctx, input) {
   });
 
   const payload = await readResponsePayload(response);
+  await assertNotHrisLoginResponse(ctx, response, payload);
 
   if (isFailedPayload(response, payload)) {
     throw new Error(payload.message || payload.error || "Clock-in gagal");
@@ -1878,6 +2149,7 @@ async function storeClockOut(ctx, input) {
   );
 
   const payload = await readResponsePayload(response);
+  await assertNotHrisLoginResponse(ctx, response, payload);
 
   if (isFailedPayload(response, payload)) {
     throw new Error(payload.message || payload.error || "Clock-out gagal");
@@ -1982,14 +2254,15 @@ async function route(req, res) {
       }
 
       if (req.method === "GET" && url.pathname === "/api/app/profile") {
-        return json(res, 200, { appUser: ctx.user });
+        return json(res, 200, {
+          appUser: ctx.user,
+          hrisCredential: await getHrisCredentialStatus(ctx),
+        });
       }
 
       if (req.method === "POST" && url.pathname === "/api/app/profile") {
-        const appUser = publicAppUser(
-          await updateAppProfile(ctx, await readJson(req)),
-        );
-        return json(res, 200, { appUser });
+        const payload = await readJson(req);
+        return json(res, 200, await updateAppProfileWithCredentials(ctx, payload));
       }
 
       if (req.method === "POST" && url.pathname === "/api/login") {
@@ -2007,19 +2280,33 @@ async function route(req, res) {
       }
 
       if (req.method === "GET" && url.pathname === "/api/clock-in-options") {
-        const [settings, options] = await Promise.all([
-          readSettings(ctx),
-          getClockInModal(ctx),
-        ]);
-        return json(res, 200, { ...options, settings });
+        return json(
+          res,
+          200,
+          await withHrisAutoLogin(ctx, async () => {
+            const [settings, options] = await Promise.all([
+              readSettings(ctx),
+              getClockInModal(ctx),
+            ]);
+            return { ...options, settings };
+          }),
+        );
       }
 
       if (req.method === "GET" && url.pathname === "/api/clock-out-options") {
-        return json(res, 200, await getClockOutOptions(ctx));
+        return json(
+          res,
+          200,
+          await withHrisAutoLogin(ctx, () => getClockOutOptions(ctx)),
+        );
       }
 
       if (req.method === "GET" && url.pathname === "/api/dashboard-status") {
-        return json(res, 200, await getDashboardStatus(ctx));
+        return json(
+          res,
+          200,
+          await withHrisAutoLogin(ctx, () => getDashboardStatus(ctx)),
+        );
       }
 
       if (req.method === "GET" && url.pathname === "/api/settings") {
@@ -2051,11 +2338,28 @@ async function route(req, res) {
       }
 
       if (req.method === "POST" && url.pathname === "/api/clock-in") {
-        return json(res, 200, await storeClockIn(ctx, await readJson(req)));
+        const payload = await readJson(req);
+        return json(
+          res,
+          200,
+          await withHrisAutoLogin(ctx, (retrying) =>
+            storeClockIn(ctx, retrying ? { ...payload, csrfToken: "" } : payload),
+          ),
+        );
       }
 
       if (req.method === "POST" && url.pathname === "/api/clock-out") {
-        return json(res, 200, await storeClockOut(ctx, await readJson(req)));
+        const payload = await readJson(req);
+        return json(
+          res,
+          200,
+          await withHrisAutoLogin(ctx, (retrying) =>
+            storeClockOut(
+              ctx,
+              retrying ? { ...payload, attendanceId: "", csrfToken: "" } : payload,
+            ),
+          ),
+        );
       }
 
       throw httpError(404, "Endpoint API tidak ditemukan.");

@@ -36,6 +36,10 @@ const state = {
   appCsrfToken: '',
   appUser: null,
   appUsers: [],
+  hrisCredential: {
+    hrisEmail: '',
+    hrisCredentialConfigured: false,
+  },
   setupRequired: false,
   appAuthenticated: false,
   csrfToken: '',
@@ -90,6 +94,10 @@ const els = {
   appProfile: document.querySelector('#appProfile'),
   appProfileInfo: document.querySelector('#appProfileInfo'),
   appWhatsappPhoneNumber: document.querySelector('#appWhatsappPhoneNumber'),
+  appHrisCredentialStatus: document.querySelector('#appHrisCredentialStatus'),
+  appHrisEmail: document.querySelector('#appHrisEmail'),
+  appHrisPassword: document.querySelector('#appHrisPassword'),
+  clearHrisCredentials: document.querySelector('#clearHrisCredentials'),
   saveAppProfile: document.querySelector('#saveAppProfile'),
   appLogout: document.querySelector('#appLogout'),
   appAdminUsers: document.querySelector('#appAdminUsers'),
@@ -214,6 +222,12 @@ function renderAppAuth() {
     ? `${state.appUser.displayName || state.appUser.username} (${state.appUser.role})`
     : '-';
   els.appWhatsappPhoneNumber.value = state.appUser?.whatsappPhoneNumber || '';
+  els.appHrisEmail.value = state.hrisCredential?.hrisEmail || '';
+  els.appHrisPassword.value = '';
+  els.appHrisCredentialStatus.textContent = state.hrisCredential?.hrisCredentialConfigured
+    ? 'Kredensial HRIS tersimpan untuk auto-login.'
+    : 'Kredensial HRIS belum disimpan.';
+  els.clearHrisCredentials.hidden = !state.hrisCredential?.hrisCredentialConfigured;
   document.body.classList.toggle('app-ready', appReady);
   renderAppUsers();
 }
@@ -315,10 +329,24 @@ async function loadBootstrap() {
   state.appUser = payload.appUser || null;
   state.setupRequired = Boolean(payload.setupRequired);
   state.appAuthenticated = Boolean(payload.authenticated);
+  if (!state.appAuthenticated) {
+    state.hrisCredential = { hrisEmail: '', hrisCredentialConfigured: false };
+  }
   if (state.appAuthenticated) loadUserUiPreferences();
   renderAppAuth();
   setLoginVisible(true);
   return payload;
+}
+
+async function loadAppProfile() {
+  if (!state.appAuthenticated) return;
+  const payload = await api('/api/app/profile');
+  state.appUser = payload.appUser || state.appUser;
+  state.hrisCredential = payload.hrisCredential || {
+    hrisEmail: '',
+    hrisCredentialConfigured: false,
+  };
+  renderAppAuth();
 }
 
 async function loadAppUsers() {
@@ -852,6 +880,7 @@ async function restoreSession() {
 async function initializeAuthenticatedApp() {
   loadUserUiPreferences();
   renderAppAuth();
+  await loadAppProfile().catch((error) => log(`Load profil gagal: ${error.message}`));
   await loadAppUsers().catch((error) => log(`Load user gagal: ${error.message}`));
   await loadSettings().catch((error) => log(error.message));
   await loadPhotos().catch((error) => log(`Load foto gagal: ${error.message}`));
@@ -893,14 +922,46 @@ els.appAuthForm.addEventListener('submit', async (event) => {
 
 els.saveAppProfile.addEventListener('click', async () => {
   try {
+    const body = {
+      whatsappPhoneNumber: els.appWhatsappPhoneNumber.value.trim(),
+    };
+    const hrisEmail = els.appHrisEmail.value.trim();
+    const hrisPassword = els.appHrisPassword.value;
+    if (hrisEmail || hrisPassword) {
+      body.hrisEmail = hrisEmail;
+      if (hrisPassword) body.hrisPassword = hrisPassword;
+    }
+
     const payload = await api('/api/app/profile', {
       method: 'POST',
-      body: JSON.stringify({ whatsappPhoneNumber: els.appWhatsappPhoneNumber.value.trim() }),
+      body: JSON.stringify(body),
     });
     state.appUser = payload.appUser || state.appUser;
+    state.hrisCredential = payload.hrisCredential || state.hrisCredential;
+    els.appHrisPassword.value = '';
     await loadAppUsers().catch((error) => log(`Load user gagal: ${error.message}`));
     renderAppAuth();
     log('Profil aplikasi tersimpan.', payload.appUser);
+  } catch (error) {
+    log(error.message);
+  }
+});
+
+els.clearHrisCredentials.addEventListener('click', async () => {
+  try {
+    const payload = await api('/api/app/profile', {
+      method: 'POST',
+      body: JSON.stringify({
+        whatsappPhoneNumber: els.appWhatsappPhoneNumber.value.trim(),
+        clearHrisCredentials: true,
+      }),
+    });
+    state.appUser = payload.appUser || state.appUser;
+    state.hrisCredential = payload.hrisCredential || state.hrisCredential;
+    els.appHrisEmail.value = '';
+    els.appHrisPassword.value = '';
+    renderAppAuth();
+    log('Kredensial HRIS dihapus.');
   } catch (error) {
     log(error.message);
   }
@@ -944,6 +1005,7 @@ els.appLogout.addEventListener('click', async () => {
   state.appCsrfToken = '';
   state.appUser = null;
   state.appUsers = [];
+  state.hrisCredential = { hrisEmail: '', hrisCredentialConfigured: false };
   state.appAuthenticated = false;
   state.csrfToken = '';
   state.photos = [];

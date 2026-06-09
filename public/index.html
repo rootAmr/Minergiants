@@ -63,6 +63,19 @@
           <label>Nomor WhatsApp pribadi
             <input id="appWhatsappPhoneNumber" type="tel" autocomplete="tel" placeholder="+628123456789">
           </label>
+          <div class="hris-credential-settings">
+            <div class="profile-summary muted-summary">
+              <span id="appHrisCredentialStatus">Kredensial HRIS belum disimpan</span>
+            </div>
+            <p class="section-copy">Email dan password HRIS ini dipakai untuk login ulang otomatis saat session HRIS habis.</p>
+            <label>Email HRIS
+              <input id="appHrisEmail" type="email" autocomplete="username" placeholder="nama@perusahaan.com">
+            </label>
+            <label>Password HRIS
+              <input id="appHrisPassword" type="password" autocomplete="new-password" placeholder="Kosongkan jika tidak ingin mengubah">
+            </label>
+            <button class="secondary compact ghost" id="clearHrisCredentials" type="button" hidden>Hapus Kredensial HRIS</button>
+          </div>
         </div>
         <div class="app-profile-actions">
           <button class="secondary compact" id="saveAppProfile" type="button">Simpan Profil</button>
