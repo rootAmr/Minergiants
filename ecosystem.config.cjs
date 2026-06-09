@@ -10,6 +10,7 @@ module.exports = {
         APP_DATA_DIR: "./data",
         HRIS_DEV_MODE: "false",
         WHATSAPP_LOG_GROUP_MESSAGES: "false",
+        APP_CREDENTIAL_SECRET: "random-secret",
       },
     },
   ],
