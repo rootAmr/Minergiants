@@ -44,11 +44,41 @@ const MAX_JSON_BODY_BYTES = 6 * 1024 * 1024;
 const MAX_PHOTO_BYTES = 4 * 1024 * 1024;
 const SESSION_COOKIE_NAME = "hris_app_session";
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
+const DEFAULT_CHECK_IN_TIME = "09:00";
+const DEFAULT_CHECK_OUT_TIME = "18:00";
+const DEFAULT_CHECK_IN_START_TIME = "08:55";
+const DEFAULT_CHECK_IN_END_TIME = "09:00";
+const DEFAULT_CHECK_OUT_START_TIME = "18:00";
+const DEFAULT_CHECK_OUT_END_TIME = "18:10";
+const SCHEDULE_STATE_KEY = "server_schedule_state";
+const SCHEDULE_INTERVAL_MS = 30_000;
+const SCHEDULE_ACTIONS = [
+  {
+    action: "clock-in",
+    baseSettingKey: "checkInTime",
+    defaultBaseTime: DEFAULT_CHECK_IN_TIME,
+    startSettingKey: "checkInStartTime",
+    endSettingKey: "checkInEndTime",
+    beforeMinutes: 5,
+    afterMinutes: 0,
+  },
+  {
+    action: "clock-out",
+    baseSettingKey: "checkOutTime",
+    defaultBaseTime: DEFAULT_CHECK_OUT_TIME,
+    startSettingKey: "checkOutStartTime",
+    endSettingKey: "checkOutEndTime",
+    beforeMinutes: 0,
+    afterMinutes: 10,
+  },
+];
 
 let db = null;
 let whatsappBot = null;
 let whatsappBotStarting = null;
+let scheduleTimer = null;
 const hrisSessions = new Map();
+const scheduledActionsInFlight = new Set();
 
 function randomCoordinateInRange(
   latitude,
@@ -205,7 +235,9 @@ function httpError(statusCode, message) {
 }
 
 function hrisSessionExpiredError() {
-  const error = new Error("Session HRIS habis, login ulang otomatis gagal dijalankan.");
+  const error = new Error(
+    "Session HRIS habis, login ulang otomatis gagal dijalankan.",
+  );
   error.hrisSessionExpired = true;
   return error;
 }
@@ -243,7 +275,11 @@ function credentialEncryptionKey() {
 
 function encryptHrisPassword(password) {
   const nonce = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", credentialEncryptionKey(), nonce);
+  const cipher = createCipheriv(
+    "aes-256-gcm",
+    credentialEncryptionKey(),
+    nonce,
+  );
   const encrypted = Buffer.concat([
     cipher.update(String(password), "utf8"),
     cipher.final(),
@@ -295,7 +331,8 @@ function publicAppUser(row) {
 }
 
 function requireAdmin(ctx) {
-  if (ctx.user.role !== "admin") throw httpError(403, "Hanya admin yang bisa mengelola user.");
+  if (ctx.user.role !== "admin")
+    throw httpError(403, "Hanya admin yang bisa mengelola user.");
 }
 
 function normalizedProfilePhone(value) {
@@ -310,12 +347,19 @@ function normalizedProfilePhone(value) {
   return whatsappPhoneNumber;
 }
 
-function ensureUniqueWhatsappPhone(database, whatsappPhoneNumber, exceptUserId = 0) {
+function ensureUniqueWhatsappPhone(
+  database,
+  whatsappPhoneNumber,
+  exceptUserId = 0,
+) {
   if (!whatsappPhoneNumber) return;
   const duplicate = database
-    .prepare("SELECT id FROM app_users WHERE whatsapp_phone_number = ? AND id <> ?")
+    .prepare(
+      "SELECT id FROM app_users WHERE whatsapp_phone_number = ? AND id <> ?",
+    )
     .get(whatsappPhoneNumber, exceptUserId);
-  if (duplicate) throw httpError(409, "Nomor WhatsApp sudah dipakai user lain.");
+  if (duplicate)
+    throw httpError(409, "Nomor WhatsApp sudah dipakai user lain.");
 }
 
 async function appUserCount() {
@@ -467,7 +511,14 @@ async function createManagedAppUser(ctx, input) {
     VALUES (?, ?, ?, ?, 'user', ?, ?)
   `,
     )
-    .run(username, hashPassword(password), displayName, whatsappPhoneNumber, now, now);
+    .run(
+      username,
+      hashPassword(password),
+      displayName,
+      whatsappPhoneNumber,
+      now,
+      now,
+    );
   return publicAppUser(
     database
       .prepare(
@@ -511,7 +562,6 @@ function updateAppProfileInDb(database, ctx, input) {
     .get(ctx.user.id);
 }
 
-
 function getHrisCredentialRowFromDb(database, userId) {
   return database
     .prepare(
@@ -539,7 +589,10 @@ function saveHrisCredentialsInDb(database, ctx, input) {
 
   const existing = getHrisCredentialRowFromDb(database, ctx.user.id);
   if (!password && !existing?.password_encrypted) {
-    throw httpError(400, "Password HRIS wajib diisi saat menyimpan kredensial baru.");
+    throw httpError(
+      400,
+      "Password HRIS wajib diisi saat menyimpan kredensial baru.",
+    );
   }
 
   if (!password && existing.email === email) {
@@ -577,17 +630,19 @@ function saveHrisCredentialsInDb(database, ctx, input) {
       new Date().toISOString(),
     );
   return {
-    status: hrisCredentialStatus(getHrisCredentialRowFromDb(database, ctx.user.id)),
+    status: hrisCredentialStatus(
+      getHrisCredentialRowFromDb(database, ctx.user.id),
+    ),
     changed: true,
   };
 }
 
-
 function clearHrisCredentialsInDb(database, ctx) {
-  database.prepare("DELETE FROM hris_credentials WHERE user_id = ?").run(ctx.user.id);
+  database
+    .prepare("DELETE FROM hris_credentials WHERE user_id = ?")
+    .run(ctx.user.id);
   return { status: hrisCredentialStatus(null), changed: true };
 }
-
 
 async function updateAppProfileWithCredentials(ctx, input) {
   const database = await getDb();
@@ -1510,16 +1565,16 @@ const DEFAULT_SETTINGS = {
   officeLongitude: DEFAULT_LONGITUDE,
   officeName: "PT Minergo Visi Maxima",
   scheduleEnabled: false,
-  checkInTime: "09:00",
-  checkOutTime: "18:00",
+  checkInTime: DEFAULT_CHECK_IN_TIME,
+  checkOutTime: DEFAULT_CHECK_OUT_TIME,
   randomCheckInEnabled: false,
   randomCheckOutEnabled: false,
   randomPhotoEnabled: false,
   selectedPhotoId: "",
-  checkInStartTime: "08:45",
-  checkInEndTime: "09:00",
-  checkOutStartTime: "17:45",
-  checkOutEndTime: "18:15",
+  checkInStartTime: DEFAULT_CHECK_IN_START_TIME,
+  checkInEndTime: DEFAULT_CHECK_IN_END_TIME,
+  checkOutStartTime: DEFAULT_CHECK_OUT_START_TIME,
+  checkOutEndTime: DEFAULT_CHECK_OUT_END_TIME,
   ...DEFAULT_WHATSAPP_SETTINGS,
 };
 
@@ -1562,10 +1617,10 @@ function sanitizeSettingsPatch(current, settings) {
       ? Boolean(settings.scheduleEnabled)
       : Boolean(current.scheduleEnabled),
     checkInTime: Object.hasOwn(settings, "checkInTime")
-      ? normalizeTimeSetting(settings.checkInTime, "09:00")
+      ? normalizeTimeSetting(settings.checkInTime, DEFAULT_CHECK_IN_TIME)
       : current.checkInTime,
     checkOutTime: Object.hasOwn(settings, "checkOutTime")
-      ? normalizeTimeSetting(settings.checkOutTime, "18:00")
+      ? normalizeTimeSetting(settings.checkOutTime, DEFAULT_CHECK_OUT_TIME)
       : current.checkOutTime,
     randomCheckInEnabled: Object.hasOwn(settings, "randomCheckInEnabled")
       ? Boolean(settings.randomCheckInEnabled)
@@ -1580,16 +1635,16 @@ function sanitizeSettingsPatch(current, settings) {
       ? String(settings.selectedPhotoId || "")
       : current.selectedPhotoId,
     checkInStartTime: Object.hasOwn(settings, "checkInStartTime")
-      ? normalizeTimeSetting(settings.checkInStartTime, "08:45")
+      ? normalizeTimeSetting(settings.checkInStartTime, DEFAULT_CHECK_IN_START_TIME)
       : current.checkInStartTime,
     checkInEndTime: Object.hasOwn(settings, "checkInEndTime")
-      ? normalizeTimeSetting(settings.checkInEndTime, "09:00")
+      ? normalizeTimeSetting(settings.checkInEndTime, DEFAULT_CHECK_IN_END_TIME)
       : current.checkInEndTime,
     checkOutStartTime: Object.hasOwn(settings, "checkOutStartTime")
-      ? normalizeTimeSetting(settings.checkOutStartTime, "17:45")
+      ? normalizeTimeSetting(settings.checkOutStartTime, DEFAULT_CHECK_OUT_START_TIME)
       : current.checkOutStartTime,
     checkOutEndTime: Object.hasOwn(settings, "checkOutEndTime")
-      ? normalizeTimeSetting(settings.checkOutEndTime, "18:15")
+      ? normalizeTimeSetting(settings.checkOutEndTime, DEFAULT_CHECK_OUT_END_TIME)
       : current.checkOutEndTime,
     whatsappBotEnabled: Object.hasOwn(settings, "whatsappBotEnabled")
       ? Boolean(settings.whatsappBotEnabled)
@@ -1689,6 +1744,270 @@ async function writeUserState(userId, key, value) {
     .run(userId, key, JSON.stringify(value), new Date().toISOString());
 }
 
+function scheduleDateKey(now = new Date()) {
+  return now.toLocaleDateString("en-CA");
+}
+
+function scheduleCurrentTime(now = new Date()) {
+  return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+}
+
+function minutesFromTimeSetting(value, fallback = "00:00") {
+  const normalized = normalizeTimeSetting(value, fallback);
+  const [hour, minute] = normalized.split(":").map(Number);
+  return hour * 60 + minute;
+}
+
+function timeFromMinutes(minutes) {
+  const normalized = Math.max(0, Math.min(1439, Math.round(minutes)));
+  const hour = String(Math.floor(normalized / 60)).padStart(2, "0");
+  const minute = String(normalized % 60).padStart(2, "0");
+  return `${hour}:${minute}`;
+}
+
+function randomTimeInWindow(startTime, endTime, random = Math.random) {
+  const start = minutesFromTimeSetting(startTime);
+  const end = Math.max(start, minutesFromTimeSetting(endTime, startTime));
+  return timeFromMinutes(start + Math.floor(random() * (end - start + 1)));
+}
+
+function scheduleActionStateKey(action, targetTime) {
+  return `${action}:${targetTime}`;
+}
+
+function normalizeScheduleState(value, now = new Date()) {
+  const dateKey = scheduleDateKey(now);
+  if (!value || typeof value !== "object" || value.dateKey !== dateKey) {
+    return { dateKey, targets: {}, actions: {} };
+  }
+  const targets =
+    value.targets && typeof value.targets === "object" ? value.targets : {};
+  const actions =
+    value.actions && typeof value.actions === "object" ? value.actions : {};
+  return { dateKey, targets, actions };
+}
+
+function scheduleTargetWindow(settings, item) {
+  const base = minutesFromTimeSetting(
+    settings?.[item.baseSettingKey],
+    item.defaultBaseTime,
+  );
+  const minStart = Math.max(0, base - item.beforeMinutes);
+  const maxEnd = Math.min(1439, base + item.afterMinutes);
+  const configuredStart = minutesFromTimeSetting(
+    settings?.[item.startSettingKey],
+    timeFromMinutes(minStart),
+  );
+  const configuredEnd = minutesFromTimeSetting(
+    settings?.[item.endSettingKey],
+    timeFromMinutes(maxEnd),
+  );
+  const start = Math.max(minStart, Math.min(maxEnd, configuredStart));
+  const end = Math.max(start, Math.min(maxEnd, configuredEnd));
+  return { start: timeFromMinutes(start), end: timeFromMinutes(end) };
+}
+
+function ensureScheduleTarget(state, settings, item) {
+  const window = scheduleTargetWindow(settings, item);
+  const savedTarget = normalizeTimeSetting(state.targets[item.action], "");
+  if (savedTarget) {
+    const saved = minutesFromTimeSetting(savedTarget);
+    if (
+      saved >= minutesFromTimeSetting(window.start) &&
+      saved <= minutesFromTimeSetting(window.end)
+    ) {
+      return { targetTime: savedTarget, changed: false };
+    }
+  }
+
+  const targetTime = randomTimeInWindow(window.start, window.end);
+  state.targets[item.action] = targetTime;
+  return { targetTime, changed: true };
+}
+
+function isScheduledActionDue(now, targetTime) {
+  return scheduleCurrentTime(now) === targetTime;
+}
+
+async function readScheduleState(userId, now = new Date()) {
+  return normalizeScheduleState(
+    await readUserState(userId, SCHEDULE_STATE_KEY),
+    now,
+  );
+}
+
+async function writeScheduleState(userId, state) {
+  await writeUserState(userId, SCHEDULE_STATE_KEY, state);
+}
+
+async function writeScheduleActionState(
+  userId,
+  now,
+  action,
+  targetTime,
+  patch,
+) {
+  const state = await readScheduleState(userId, now);
+  const key = scheduleActionStateKey(action, targetTime);
+  state.actions[key] = {
+    action,
+    targetTime,
+    ...(state.actions[key] || {}),
+    ...patch,
+  };
+  await writeScheduleState(userId, state);
+}
+
+function schedulePayloadSummary(payload) {
+  if (!payload || typeof payload !== "object") return {};
+  return {
+    status: String(payload.status || ""),
+    message: String(payload.message || ""),
+    attendanceId: String(payload.attendanceId || ""),
+    devMode: Boolean(payload.devMode),
+  };
+}
+
+function schedulerActionLabel(action) {
+  return action === "clock-in" ? "Clock-in" : "Clock-out";
+}
+
+function schedulerSuccessMessage({ user, item, targetTime, payload, input }) {
+  const summary = schedulePayloadSummary(payload);
+  const lines = [
+    `${schedulerActionLabel(item.action)} scheduler sukses.`,
+    `User: ${user.displayName || user.username} (@${user.username})`,
+    `Target random: ${targetTime}`,
+    `Selesai: ${new Date().toLocaleString("id-ID")}`,
+  ];
+  if (input?.photoId) lines.push(`Foto: #${input.photoId}`);
+  if (summary.status) lines.push(`Status: ${summary.status}`);
+  if (summary.message) lines.push(`Pesan: ${summary.message}`);
+  if (summary.attendanceId) lines.push(`Attendance ID: ${summary.attendanceId}`);
+  if (summary.devMode) lines.push("Mode: dev");
+  return lines.join("\n");
+}
+
+async function notifySchedulerSuccess({ user, settings, item, targetTime, payload, input }) {
+  const groupJid = normalizeGroupJid(settings.whatsappGroupJid);
+  if (!groupJid) return;
+  if (!whatsappBot && whatsappBotStarting) await whatsappBotStarting;
+  if (!whatsappBot?.sendMessage) {
+    console.error("Scheduler notification gagal: WhatsApp bot belum aktif.");
+    return;
+  }
+  await whatsappBot.sendMessage(groupJid, {
+    text: schedulerSuccessMessage({ user, item, targetTime, payload, input }),
+  });
+}
+
+async function scheduledClockInInput(ctx, settings) {
+  if (settings.randomPhotoEnabled) {
+    const photos = await listPhotos(ctx);
+    const photo = photos[Math.floor(Math.random() * photos.length)];
+    return photo ? { photoId: String(photo.id) } : {};
+  }
+  if (settings.selectedPhotoId)
+    return { photoId: String(settings.selectedPhotoId) };
+  return {};
+}
+
+async function runScheduledActionForUser(user, settings, item, now = new Date()) {
+  const state = await readScheduleState(user.id, now);
+  const target = ensureScheduleTarget(state, settings, item);
+  if (target.changed) await writeScheduleState(user.id, state);
+  if (!isScheduledActionDue(now, target.targetTime)) return;
+
+  const actionKey = scheduleActionStateKey(item.action, target.targetTime);
+  if (state.actions[actionKey]) return;
+
+  const runKey = `${user.id}:${state.dateKey}:${actionKey}`;
+  if (scheduledActionsInFlight.has(runKey)) return;
+  scheduledActionsInFlight.add(runKey);
+
+  const ctx = { user };
+  const input = item.action === "clock-in" ? await scheduledClockInInput(ctx, settings) : {};
+  await writeScheduleActionState(user.id, now, item.action, target.targetTime, {
+    status: "running",
+    startedAt: new Date().toISOString(),
+  });
+
+  try {
+    const payload =
+      item.action === "clock-in"
+        ? await withHrisAutoLogin(ctx, (retrying) =>
+            lakukanHalKeren(
+              ctx,
+              retrying ? { ...input, csrfToken: "" } : input,
+            ),
+          )
+        : await withHrisAutoLogin(ctx, (retrying) =>
+            lakukanHalTidakKeren(
+              ctx,
+              retrying ? { attendanceId: "", csrfToken: "" } : {},
+            ),
+          );
+    await writeScheduleActionState(user.id, now, item.action, target.targetTime, {
+      status: "success",
+      finishedAt: new Date().toISOString(),
+      payload: schedulePayloadSummary(payload),
+    });
+    await notifySchedulerSuccess({
+      user,
+      settings,
+      item,
+      targetTime: target.targetTime,
+      payload,
+      input,
+    }).catch((error) =>
+      console.error(`Scheduler notification gagal: ${error.message}`),
+    );
+    console.log(
+      `Scheduler ${item.action} user ${user.username} sukses pada ${target.targetTime}.`,
+    );
+  } catch (error) {
+    await writeScheduleActionState(user.id, now, item.action, target.targetTime, {
+      status: "error",
+      finishedAt: new Date().toISOString(),
+      message: error.message,
+    });
+    console.error(
+      `Scheduler ${item.action} user ${user.username} gagal pada ${target.targetTime}: ${error.message}`,
+    );
+  } finally {
+    scheduledActionsInFlight.delete(runKey);
+  }
+}
+
+async function runScheduleTick(now = new Date()) {
+  const users = await listAppUsers();
+  await Promise.all(
+    users.map(async (user) => {
+      const settings = await readSettingsForUserId(user.id);
+      if (!settings.scheduleEnabled) return;
+      for (const item of SCHEDULE_ACTIONS) {
+        await runScheduledActionForUser(user, settings, item, now);
+      }
+    }),
+  );
+}
+
+function startScheduleTimer() {
+  if (scheduleTimer) return;
+  const tick = () =>
+    runScheduleTick().catch((error) =>
+      console.error(`Scheduler tick gagal: ${error.message}`),
+    );
+  scheduleTimer = setInterval(tick, SCHEDULE_INTERVAL_MS);
+  tick();
+}
+
+function stopScheduleTimer() {
+  if (!scheduleTimer) return;
+  clearInterval(scheduleTimer);
+  scheduleTimer = null;
+}
+
 async function listAppUsers() {
   const database = await getDb();
   return database
@@ -1718,13 +2037,13 @@ function botContextForUser(user) {
     getSessionStatus: () => getSessionStatus(ctx),
     getDashboardStatus: () =>
       withHrisAutoLogin(ctx, () => getDashboardStatus(ctx)),
-    storeClockIn: (input) =>
+    lakukanHalKeren: (input) =>
       withHrisAutoLogin(ctx, (retrying) =>
-        storeClockIn(ctx, retrying ? { ...input, csrfToken: "" } : input),
+        lakukanHalKeren(ctx, retrying ? { ...input, csrfToken: "" } : input),
       ),
-    storeClockOut: (input) =>
+    lakukanHalTidakKeren: (input) =>
       withHrisAutoLogin(ctx, (retrying) =>
-        storeClockOut(
+        lakukanHalTidakKeren(
           ctx,
           retrying ? { ...input, attendanceId: "", csrfToken: "" } : input,
         ),
@@ -1743,9 +2062,16 @@ async function listWhatsappUsers() {
   return entries;
 }
 
+function needsWhatsappBot(settings) {
+  return (
+    settings.whatsappBotEnabled ||
+    (settings.scheduleEnabled && normalizeGroupJid(settings.whatsappGroupJid))
+  );
+}
+
 async function syncWhatsappBot() {
   const users = await listWhatsappUsers();
-  if (!users.some((entry) => entry.settings.whatsappBotEnabled)) {
+  if (!users.some((entry) => needsWhatsappBot(entry.settings))) {
     await stopWhatsappBot();
     return;
   }
@@ -1973,7 +2299,9 @@ async function getClockOutOptions(ctx) {
     const modalHtml = await modalResponse.text();
     await assertNotHrisLoginResponse(ctx, modalResponse, modalHtml);
     if (!modalResponse.ok)
-      throw new Error(`Modal clock-out HRIS gagal dimuat (${modalResponse.status})`);
+      throw new Error(
+        `Modal clock-out HRIS gagal dimuat (${modalResponse.status})`,
+      );
     return { ...options, ...parseClockOutModal(modalHtml) };
   }
 
@@ -2002,7 +2330,7 @@ async function getDashboardStatus(ctx) {
   };
 }
 
-async function storeClockIn(ctx, input) {
+async function lakukanHalKeren(ctx, input) {
   const settings = await readSettings(ctx);
   const session = getHrisSession(ctx);
   const modal = input.csrfToken ? null : await getClockInModal(ctx);
@@ -2020,7 +2348,9 @@ async function storeClockIn(ctx, input) {
     !modal.locations.some((item) => item.id === location)
   ) {
     location = String(
-      modal.locations.find((item) => item.selected)?.id || modal.locations[0]?.id || "",
+      modal.locations.find((item) => item.selected)?.id ||
+        modal.locations[0]?.id ||
+        "",
     );
   }
   const fallbackCoords = randomCoordinateInRange(
@@ -2096,7 +2426,8 @@ async function storeClockIn(ctx, input) {
   return payload;
 }
 
-async function storeClockOut(ctx, input) {
+async function lakukanHalTidakKeren(ctx, input) {
+  const settings = await readSettings(ctx);
   const session = getHrisSession(ctx);
   const options =
     input.attendanceId && input.csrfToken
@@ -2109,8 +2440,8 @@ async function storeClockOut(ctx, input) {
     input.csrfToken || options?.csrfToken || session.lastCsrfToken || "",
   );
   const fallbackCoords = randomCoordinateInRange(
-    DEFAULT_LATITUDE,
-    DEFAULT_LONGITUDE,
+    settings.officeLatitude || DEFAULT_LATITUDE,
+    settings.officeLongitude || DEFAULT_LONGITUDE,
   );
   const currentLatitude = String(
     input.currentLatitude || fallbackCoords.latitude,
@@ -2250,7 +2581,10 @@ async function route(req, res) {
 
       if (req.method === "POST" && url.pathname === "/api/app/users") {
         const appUser = await createManagedAppUser(ctx, await readJson(req));
-        return json(res, 200, { appUser, users: await listManagedAppUsers(ctx) });
+        return json(res, 200, {
+          appUser,
+          users: await listManagedAppUsers(ctx),
+        });
       }
 
       if (req.method === "GET" && url.pathname === "/api/app/profile") {
@@ -2262,7 +2596,11 @@ async function route(req, res) {
 
       if (req.method === "POST" && url.pathname === "/api/app/profile") {
         const payload = await readJson(req);
-        return json(res, 200, await updateAppProfileWithCredentials(ctx, payload));
+        return json(
+          res,
+          200,
+          await updateAppProfileWithCredentials(ctx, payload),
+        );
       }
 
       if (req.method === "POST" && url.pathname === "/api/login") {
@@ -2343,7 +2681,10 @@ async function route(req, res) {
           res,
           200,
           await withHrisAutoLogin(ctx, (retrying) =>
-            storeClockIn(ctx, retrying ? { ...payload, csrfToken: "" } : payload),
+            lakukanHalKeren(
+              ctx,
+              retrying ? { ...payload, csrfToken: "" } : payload,
+            ),
           ),
         );
       }
@@ -2354,9 +2695,11 @@ async function route(req, res) {
           res,
           200,
           await withHrisAutoLogin(ctx, (retrying) =>
-            storeClockOut(
+            lakukanHalTidakKeren(
               ctx,
-              retrying ? { ...payload, attendanceId: "", csrfToken: "" } : payload,
+              retrying
+                ? { ...payload, attendanceId: "", csrfToken: "" }
+                : payload,
             ),
           ),
         );
@@ -2390,17 +2733,20 @@ server.on("error", (error) => {
 });
 server.listen(port, "127.0.0.1", () => {
   console.log(`HRIS Clock-In Helper running at http://127.0.0.1:${port}`);
+  startScheduleTimer();
   syncWhatsappBot().catch((error) =>
     console.error(`WhatsApp bot sync failed: ${error.message}`),
   );
 });
 
 process.on("SIGINT", async () => {
+  stopScheduleTimer();
   await stopWhatsappBot();
   process.exit(0);
 });
 
 process.on("SIGTERM", async () => {
+  stopScheduleTimer();
   await stopWhatsappBot();
   process.exit(0);
 });

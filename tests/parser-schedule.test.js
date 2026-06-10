@@ -50,6 +50,24 @@ async function loadScheduleDueHelper() {
   `)();
 }
 
+async function loadServerScheduleHelpers() {
+  const source = await readFile(new URL('../server.js', import.meta.url), 'utf8');
+  const normalizeStart = source.indexOf('function normalizeTimeSetting');
+  const normalizeEnd = source.indexOf('function normalizeReminderLeadMinutes');
+  const scheduleStart = source.indexOf('function scheduleDateKey');
+  const scheduleEnd = source.indexOf('async function readScheduleState');
+  assert.notEqual(normalizeStart, -1, 'normalizeTimeSetting function not found');
+  assert.notEqual(normalizeEnd, -1, 'normalizeReminderLeadMinutes function not found');
+  assert.notEqual(scheduleStart, -1, 'scheduleDateKey function not found');
+  assert.notEqual(scheduleEnd, -1, 'readScheduleState function not found');
+
+  return new Function(`
+    ${source.slice(normalizeStart, normalizeEnd)}
+    ${source.slice(scheduleStart, scheduleEnd)}
+    return { scheduleTargetWindow, ensureScheduleTarget, isScheduledActionDue, minutesFromTimeSetting };
+  `)();
+}
+
 async function loadCoordinateHelpers() {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   const start = source.indexOf('const DEFAULT_COORDS');
@@ -156,4 +174,49 @@ test('dailyRandomTarget stays inside configured range and is stable for same day
   assert.equal(second, first);
   assert.ok(minutesFromTime(first) >= minutesFromTime('08:45'));
   assert.ok(minutesFromTime(first) <= minutesFromTime('09:00'));
+});
+
+test('server scheduler clamps random windows and keeps one target per day', async () => {
+  const {
+    scheduleTargetWindow,
+    ensureScheduleTarget,
+    minutesFromTimeSetting,
+  } = await loadServerScheduleHelpers();
+  const checkIn = {
+    action: 'clock-in',
+    baseSettingKey: 'checkInTime',
+    defaultBaseTime: '09:00',
+    startSettingKey: 'checkInStartTime',
+    endSettingKey: 'checkInEndTime',
+    beforeMinutes: 5,
+    afterMinutes: 0,
+  };
+  const checkOut = {
+    action: 'clock-out',
+    baseSettingKey: 'checkOutTime',
+    defaultBaseTime: '18:00',
+    startSettingKey: 'checkOutStartTime',
+    endSettingKey: 'checkOutEndTime',
+    beforeMinutes: 0,
+    afterMinutes: 10,
+  };
+
+  assert.deepEqual(
+    scheduleTargetWindow({ checkInStartTime: '08:45', checkInEndTime: '09:10' }, checkIn),
+    { start: '08:55', end: '09:00' },
+  );
+  assert.deepEqual(
+    scheduleTargetWindow({ checkOutStartTime: '17:45', checkOutEndTime: '18:15' }, checkOut),
+    { start: '18:00', end: '18:10' },
+  );
+
+  const state = { targets: {}, actions: {} };
+  const first = ensureScheduleTarget(state, {}, checkIn);
+  const second = ensureScheduleTarget(state, {}, checkIn);
+
+  assert.equal(first.changed, true);
+  assert.equal(second.changed, false);
+  assert.equal(second.targetTime, first.targetTime);
+  assert.ok(minutesFromTimeSetting(first.targetTime) >= minutesFromTimeSetting('08:55'));
+  assert.ok(minutesFromTimeSetting(first.targetTime) <= minutesFromTimeSetting('09:00'));
 });

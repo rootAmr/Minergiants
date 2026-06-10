@@ -6,6 +6,12 @@ const DEFAULT_COORDS = {
 };
 const DEFAULT_COORD_RADIUS_METERS = 5;
 const METERS_PER_DEGREE_LATITUDE = 111_320;
+const DEFAULT_CHECK_IN_TIME = '09:00';
+const DEFAULT_CHECK_OUT_TIME = '18:00';
+const DEFAULT_CHECK_IN_START_TIME = '08:55';
+const DEFAULT_CHECK_IN_END_TIME = '09:00';
+const DEFAULT_CHECK_OUT_START_TIME = '18:00';
+const DEFAULT_CHECK_OUT_END_TIME = '18:10';
 
 function randomCoordinateInRange(latitude, longitude, radiusMeters = DEFAULT_COORD_RADIUS_METERS, random = Math.random) {
   const baseLatitude = Number.isFinite(Number(latitude)) ? Number(latitude) : DEFAULT_COORDS.latitude;
@@ -48,16 +54,16 @@ const state = {
     defaultLocationId: '',
     workingFrom: '',
     scheduleEnabled: false,
-    checkInTime: '09:00',
-    checkOutTime: '18:00',
+    checkInTime: DEFAULT_CHECK_IN_TIME,
+    checkOutTime: DEFAULT_CHECK_OUT_TIME,
     randomCheckInEnabled: false,
     randomCheckOutEnabled: false,
     randomPhotoEnabled: false,
     selectedPhotoId: '',
-    checkInStartTime: '08:45',
-    checkInEndTime: '09:00',
-    checkOutStartTime: '17:45',
-    checkOutEndTime: '18:15',
+    checkInStartTime: DEFAULT_CHECK_IN_START_TIME,
+    checkInEndTime: DEFAULT_CHECK_IN_END_TIME,
+    checkOutStartTime: DEFAULT_CHECK_OUT_START_TIME,
+    checkOutEndTime: DEFAULT_CHECK_OUT_END_TIME,
     whatsappBotEnabled: false,
     whatsappReminderEnabled: true,
     whatsappGroupJid: '',
@@ -380,17 +386,17 @@ function renderSettings() {
 
 function renderSchedule() {
   const enabled = Boolean(state.settings.scheduleEnabled);
-  const checkInTime = normalizeTime(state.settings.checkInTime, '09:00');
-  const checkOutTime = normalizeTime(state.settings.checkOutTime, '18:00');
+  const checkInTime = normalizeTime(state.settings.checkInTime, DEFAULT_CHECK_IN_TIME);
+  const checkOutTime = normalizeTime(state.settings.checkOutTime, DEFAULT_CHECK_OUT_TIME);
   const randomCheckIn = Boolean(state.settings.randomCheckInEnabled);
   const randomCheckOut = Boolean(state.settings.randomCheckOutEnabled);
 
   els.checkInTime.value = checkInTime;
   els.checkOutTime.value = checkOutTime;
-  els.checkInStartTime.value = normalizeTime(state.settings.checkInStartTime, '08:45');
-  els.checkInEndTime.value = normalizeTime(state.settings.checkInEndTime, '09:00');
-  els.checkOutStartTime.value = normalizeTime(state.settings.checkOutStartTime, '17:45');
-  els.checkOutEndTime.value = normalizeTime(state.settings.checkOutEndTime, '18:15');
+  els.checkInStartTime.value = normalizeTime(state.settings.checkInStartTime, DEFAULT_CHECK_IN_START_TIME);
+  els.checkInEndTime.value = normalizeTime(state.settings.checkInEndTime, DEFAULT_CHECK_IN_END_TIME);
+  els.checkOutStartTime.value = normalizeTime(state.settings.checkOutStartTime, DEFAULT_CHECK_OUT_START_TIME);
+  els.checkOutEndTime.value = normalizeTime(state.settings.checkOutEndTime, DEFAULT_CHECK_OUT_END_TIME);
 
   renderToggle(els.scheduleEnabled, enabled, 'Schedule');
   els.scheduleDetails.hidden = !enabled || !state.scheduleDetailsExpanded;
@@ -406,9 +412,7 @@ function renderSchedule() {
     return;
   }
 
-  const checkInTarget = getScheduleTime('clock-in');
-  const checkOutTarget = getScheduleTime('clock-out');
-  els.scheduleInfo.textContent = `Reminder lokal: check-in ${checkInTarget}, check-out ${checkOutTarget}`;
+  els.scheduleInfo.textContent = `Scheduler aktif: random check-in ${els.checkInStartTime.value}-${els.checkInEndTime.value}, check-out ${els.checkOutStartTime.value}-${els.checkOutEndTime.value}`;
 }
 
 function renderWhatsappSettings() {
@@ -485,11 +489,11 @@ function dailyRandomTarget(action, startTime, endTime) {
 
 function getScheduleTime(action) {
   if (action === 'clock-in') {
-    if (!state.settings.randomCheckInEnabled) return normalizeTime(state.settings.checkInTime, '09:00');
-    return dailyRandomTarget(action, state.settings.checkInStartTime || '08:45', state.settings.checkInEndTime || '09:00');
+    if (!state.settings.randomCheckInEnabled) return normalizeTime(state.settings.checkInTime, DEFAULT_CHECK_IN_TIME);
+    return dailyRandomTarget(action, state.settings.checkInStartTime || DEFAULT_CHECK_IN_START_TIME, state.settings.checkInEndTime || DEFAULT_CHECK_IN_END_TIME);
   }
-  if (!state.settings.randomCheckOutEnabled) return normalizeTime(state.settings.checkOutTime, '18:00');
-  return dailyRandomTarget(action, state.settings.checkOutStartTime || '17:45', state.settings.checkOutEndTime || '18:15');
+  if (!state.settings.randomCheckOutEnabled) return normalizeTime(state.settings.checkOutTime, DEFAULT_CHECK_OUT_TIME);
+  return dailyRandomTarget(action, state.settings.checkOutStartTime || DEFAULT_CHECK_OUT_START_TIME, state.settings.checkOutEndTime || DEFAULT_CHECK_OUT_END_TIME);
 }
 
 async function saveScheduleSettings(patch) {
@@ -497,14 +501,14 @@ async function saveScheduleSettings(patch) {
     method: 'POST',
     body: JSON.stringify({
       scheduleEnabled: Boolean(state.settings.scheduleEnabled),
-      checkInTime: normalizeTime(els.checkInTime.value, '09:00'),
-      checkOutTime: normalizeTime(els.checkOutTime.value, '18:00'),
+      checkInTime: normalizeTime(els.checkInTime.value, DEFAULT_CHECK_IN_TIME),
+      checkOutTime: normalizeTime(els.checkOutTime.value, DEFAULT_CHECK_OUT_TIME),
       randomCheckInEnabled: Boolean(state.settings.randomCheckInEnabled),
       randomCheckOutEnabled: Boolean(state.settings.randomCheckOutEnabled),
-      checkInStartTime: normalizeTime(els.checkInStartTime.value, '08:45'),
-      checkInEndTime: normalizeTime(els.checkInEndTime.value, '09:00'),
-      checkOutStartTime: normalizeTime(els.checkOutStartTime.value, '17:45'),
-      checkOutEndTime: normalizeTime(els.checkOutEndTime.value, '18:15'),
+      checkInStartTime: normalizeTime(els.checkInStartTime.value, DEFAULT_CHECK_IN_START_TIME),
+      checkInEndTime: normalizeTime(els.checkInEndTime.value, DEFAULT_CHECK_IN_END_TIME),
+      checkOutStartTime: normalizeTime(els.checkOutStartTime.value, DEFAULT_CHECK_OUT_START_TIME),
+      checkOutEndTime: normalizeTime(els.checkOutEndTime.value, DEFAULT_CHECK_OUT_END_TIME),
       ...patch,
     }),
   });
@@ -1084,7 +1088,7 @@ els.scheduleEnabled.addEventListener('click', async () => {
   try {
     const enabled = !state.settings.scheduleEnabled;
     const payload = await saveScheduleSettings({ scheduleEnabled: enabled });
-    log(enabled ? 'Reminder lokal aktif.' : 'Reminder lokal nonaktif.', payload);
+    log(enabled ? 'Scheduler server aktif.' : 'Scheduler server nonaktif.', payload);
   } catch (error) {
     log(error.message);
   }
@@ -1119,14 +1123,14 @@ els.randomCheckOutEnabled.addEventListener('click', async () => {
 els.saveSchedule.addEventListener('click', async () => {
   try {
     const payload = await saveScheduleSettings({
-      checkInTime: normalizeTime(els.checkInTime.value, '09:00'),
-      checkOutTime: normalizeTime(els.checkOutTime.value, '18:00'),
-      checkInStartTime: normalizeTime(els.checkInStartTime.value, '08:45'),
-      checkInEndTime: normalizeTime(els.checkInEndTime.value, '09:00'),
-      checkOutStartTime: normalizeTime(els.checkOutStartTime.value, '17:45'),
-      checkOutEndTime: normalizeTime(els.checkOutEndTime.value, '18:15'),
+      checkInTime: normalizeTime(els.checkInTime.value, DEFAULT_CHECK_IN_TIME),
+      checkOutTime: normalizeTime(els.checkOutTime.value, DEFAULT_CHECK_OUT_TIME),
+      checkInStartTime: normalizeTime(els.checkInStartTime.value, DEFAULT_CHECK_IN_START_TIME),
+      checkInEndTime: normalizeTime(els.checkInEndTime.value, DEFAULT_CHECK_IN_END_TIME),
+      checkOutStartTime: normalizeTime(els.checkOutStartTime.value, DEFAULT_CHECK_OUT_START_TIME),
+      checkOutEndTime: normalizeTime(els.checkOutEndTime.value, DEFAULT_CHECK_OUT_END_TIME),
     });
-    log('Jadwal reminder lokal tersimpan.', payload);
+    log('Jadwal scheduler tersimpan.', payload);
   } catch (error) {
     log(error.message);
   }

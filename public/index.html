@@ -136,7 +136,7 @@
       <section class="card panel schedule-panel">
         <div class="section-title">
           <span>01</span>
-          <h2>Reminder Lokal</h2>
+          <h2>Scheduler Otomatis</h2>
         </div>
         <div class="schedule-toggle-row">
           <span id="scheduleInfo">Jadwal nonaktif</span>
@@ -151,10 +151,10 @@
               <b>Check In</b>
               <button class="toggle compact" id="randomCheckInEnabled" type="button" aria-pressed="false">Random CI: OFF</button>
             </div>
-            <label>Jam Check In Tetap</label>
+            <label>Jam Check In Default</label>
             <input id="checkInTime" type="time" value="09:00">
             <div class="time-range">
-              <label>Dari <input id="checkInStartTime" type="time" value="08:45"></label>
+              <label>Dari <input id="checkInStartTime" type="time" value="08:55"></label>
               <label>Sampai <input id="checkInEndTime" type="time" value="09:00"></label>
             </div>
           </div>
@@ -164,11 +164,11 @@
               <b>Check Out</b>
               <button class="toggle compact" id="randomCheckOutEnabled" type="button" aria-pressed="false">Random CO: OFF</button>
             </div>
-            <label>Jam Check Out Tetap</label>
+            <label>Jam Check Out Default</label>
             <input id="checkOutTime" type="time" value="18:00">
             <div class="time-range">
-              <label>Dari <input id="checkOutStartTime" type="time" value="17:45"></label>
-              <label>Sampai <input id="checkOutEndTime" type="time" value="18:15"></label>
+              <label>Dari <input id="checkOutStartTime" type="time" value="18:00"></label>
+              <label>Sampai <input id="checkOutEndTime" type="time" value="18:10"></label>
             </div>
           </div>
 
@@ -190,7 +190,7 @@
         </div>
         <label>WhatsApp Group JID</label>
         <input id="whatsappGroupJid" type="text" placeholder="Contoh: 120363xxxxxxxx@g.us">
-        <p class="hint">Bot hanya memproses command dari group ini. Setiap user harus menyimpan nomor WhatsApp sendiri di profil aplikasi.</p>
+        <p class="hint">Group ini dipakai untuk command bot, reminder, dan notifikasi sukses scheduler. Setiap user harus menyimpan nomor WhatsApp sendiri di profil aplikasi.</p>
         <label>Reminder sebelum target (menit)</label>
         <input id="whatsappReminderLeadMinutes" type="number" min="1" max="60" value="5">
         <div class="schedule-group">
@@ -208,7 +208,7 @@
           </div>
         </div>
         <button class="secondary" id="saveWhatsappSettings" type="button">Simpan WhatsApp</button>
-        <p class="hint">Scan QR di terminal setelah bot aktif. WhatsApp hanya mengirim reminder; submit HRIS tetap perlu command eksplisit.</p>
+        <p class="hint">Scan QR di terminal setelah bot aktif. Command WhatsApp tetap eksplisit; scheduler server otomatis mengirim notifikasi sukses ke group ini.</p>
       </section>
     </section>
 

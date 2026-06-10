@@ -405,7 +405,7 @@ curl -sS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
 ### Contoh JavaScript Store Clock In
 
 ```js
-async function storeClockIn({
+async function lakukanHalKeren({
   csrfToken,
   locationId = '1',
   latitude,
@@ -594,10 +594,10 @@ Response default:
   "randomCheckOutEnabled": false,
   "randomPhotoEnabled": false,
   "selectedPhotoId": "",
-  "checkInStartTime": "08:45",
+  "checkInStartTime": "08:55",
   "checkInEndTime": "09:00",
-  "checkOutStartTime": "17:45",
-  "checkOutEndTime": "18:15"
+  "checkOutStartTime": "18:00",
+  "checkOutEndTime": "18:10"
 }
 ```
 
@@ -626,10 +626,10 @@ Body boleh parsial; field yang tidak dikirim akan mempertahankan nilai lama.
   "randomCheckOutEnabled": true,
   "randomPhotoEnabled": false,
   "selectedPhotoId": "",
-  "checkInStartTime": "08:45",
+  "checkInStartTime": "08:55",
   "checkInEndTime": "09:00",
-  "checkOutStartTime": "17:45",
-  "checkOutEndTime": "18:15"
+  "checkOutStartTime": "18:00",
+  "checkOutEndTime": "18:10"
 }
 ```
 
@@ -642,19 +642,21 @@ Keterangan field:
 | `officeLatitude` | string | `-1.228552` | Latitude default jika GPS browser tidak dipakai. |
 | `officeLongitude` | string | `116.881761` | Longitude default jika GPS browser tidak dipakai. |
 | `officeName` | string | `PT Minergo Visi Maxima` | Label lokasi default yang ditampilkan di UI. |
-| `scheduleEnabled` | boolean | `false` | Toggle jadwal otomatis di browser. |
-| `checkInTime` | string `HH:mm` | `09:00` | Jam target check-in jika random nonaktif. |
-| `checkOutTime` | string `HH:mm` | `18:00` | Jam target check-out jika random nonaktif. |
-| `randomCheckInEnabled` | boolean | `false` | Jika aktif, target check-in dipilih random dari rentang check-in. |
-| `randomCheckOutEnabled` | boolean | `false` | Jika aktif, target check-out dipilih random dari rentang check-out. |
-| `randomPhotoEnabled` | boolean | `false` | Jika aktif, clock-in bisa memakai foto tersimpan. |
-| `selectedPhotoId` | string | kosong | ID foto tersimpan yang dipakai. |
-| `checkInStartTime` | string `HH:mm` | `08:45` | Awal rentang random check-in. |
+| `scheduleEnabled` | boolean | `false` | Toggle scheduler server per user. Saat aktif, server membuat target random harian dan menjalankan clock-in/clock-out otomatis. |
+| `checkInTime` | string `HH:mm` | `09:00` | Jam default check-in; scheduler server memakai window random maksimal 5 menit sebelum jam ini. |
+| `checkOutTime` | string `HH:mm` | `18:00` | Jam default check-out; scheduler server memakai window random maksimal 10 menit setelah jam ini. |
+| `randomCheckInEnabled` | boolean | `false` | Toggle reminder lokal browser untuk target check-in random. Scheduler server tetap memakai target random harian. |
+| `randomCheckOutEnabled` | boolean | `false` | Toggle reminder lokal browser untuk target check-out random. Scheduler server tetap memakai target random harian. |
+| `randomPhotoEnabled` | boolean | `false` | Jika aktif, clock-in scheduler/API bisa memakai foto tersimpan secara random. |
+| `selectedPhotoId` | string | kosong | ID foto tersimpan yang dipakai clock-in scheduler/API jika random foto nonaktif. |
+| `checkInStartTime` | string `HH:mm` | `08:55` | Awal rentang random check-in; scheduler server meng-clamp ke threshold 08:55-09:00. |
 | `checkInEndTime` | string `HH:mm` | `09:00` | Akhir rentang random check-in. |
-| `checkOutStartTime` | string `HH:mm` | `17:45` | Awal rentang random check-out. |
-| `checkOutEndTime` | string `HH:mm` | `18:15` | Akhir rentang random check-out. |
+| `checkOutStartTime` | string `HH:mm` | `18:00` | Awal rentang random check-out; scheduler server meng-clamp ke threshold 18:00-18:10. |
+| `checkOutEndTime` | string `HH:mm` | `18:10` | Akhir rentang random check-out. |
 
 Response sukses mengembalikan settings lengkap yang sudah dinormalisasi.
+
+Scheduler server berjalan di proses `server.js`, mengecek semua user dengan `scheduleEnabled: true`, membuat target random harian per user, dan menyimpan status attempt di `user_app_state`. Jika action scheduler sukses dan `whatsappGroupJid` terisi, server mengirim notifikasi sukses ke group WhatsApp melalui bot yang sama.
 
 ### 5.6 Dashboard Status
 
